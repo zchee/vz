@@ -1,12 +1,5 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_11.h"
-# include "virtualization_13.h"
-*/
-import "C"
 import (
 	"fmt"
 	"os"
@@ -55,9 +48,7 @@ type LinuxBootLoaderOption func(b *LinuxBootLoader) error
 func WithCommandLine(cmdLine string) LinuxBootLoaderOption {
 	return func(b *LinuxBootLoader) error {
 		b.cmdLine = cmdLine
-		cs := charWithGoString(cmdLine)
-		defer cs.Free()
-		C.setCommandLineVZLinuxBootLoader(objc.Ptr(b), cs.CString())
+		objc.SendVoid(objc.Ptr(b), "setCommandLine:", objc.NSString(cmdLine))
 		return nil
 	}
 }
@@ -69,9 +60,7 @@ func WithInitrd(initrdPath string) LinuxBootLoaderOption {
 			return fmt.Errorf("invalid initial RAM disk path: %w", err)
 		}
 		b.initrdPath = initrdPath
-		cs := charWithGoString(initrdPath)
-		defer cs.Free()
-		C.setInitialRamdiskURLVZLinuxBootLoader(objc.Ptr(b), cs.CString())
+		objc.SendVoid(objc.Ptr(b), "setInitialRamdiskURL:", objc.FileURL(initrdPath))
 		return nil
 	}
 }
@@ -88,12 +77,10 @@ func NewLinuxBootLoader(vmlinuz string, opts ...LinuxBootLoaderOption) (*LinuxBo
 		return nil, fmt.Errorf("invalid linux kernel path: %w", err)
 	}
 
-	vmlinuzPath := charWithGoString(vmlinuz)
-	defer vmlinuzPath.Free()
 	bootLoader := &LinuxBootLoader{
 		vmlinuzPath: vmlinuz,
 		pointer: objc.NewPointer(
-			C.newVZLinuxBootLoader(vmlinuzPath.CString()),
+			objc.New("VZLinuxBootLoader", "initWithKernelURL:", objc.FileURL(vmlinuz)),
 		),
 	}
 	objc.SetFinalizer(bootLoader, func(self *LinuxBootLoader) {
@@ -106,8 +93,6 @@ func NewLinuxBootLoader(vmlinuz string, opts ...LinuxBootLoaderOption) (*LinuxBo
 	}
 	return bootLoader, nil
 }
-
-var _ BootLoader = (*LinuxBootLoader)(nil)
 
 // EFIBootLoader Boot loader configuration for booting guest operating systems expecting an EFI ROM.
 // see: https://developer.apple.com/documentation/virtualization/vzefibootloader?language=objc
@@ -125,7 +110,7 @@ type NewEFIBootLoaderOption func(b *EFIBootLoader)
 // WithEFIVariableStore sets the optional EFI variable store.
 func WithEFIVariableStore(variableStore *EFIVariableStore) NewEFIBootLoaderOption {
 	return func(e *EFIBootLoader) {
-		C.setVariableStoreVZEFIBootLoader(objc.Ptr(e), objc.Ptr(variableStore))
+		objc.SendVoid(objc.Ptr(e), "setVariableStore:", objc.Ptr(variableStore))
 		e.variableStore = variableStore
 	}
 }
@@ -140,7 +125,7 @@ func NewEFIBootLoader(opts ...NewEFIBootLoaderOption) (*EFIBootLoader, error) {
 	}
 	bootLoader := &EFIBootLoader{
 		pointer: objc.NewPointer(
-			C.newVZEFIBootLoader(),
+			objc.New("VZEFIBootLoader", "init"),
 		),
 	}
 	for _, optFunc := range opts {
@@ -156,6 +141,10 @@ func NewEFIBootLoader(opts ...NewEFIBootLoaderOption) (*EFIBootLoader, error) {
 func (e *EFIBootLoader) VariableStore() *EFIVariableStore {
 	return e.variableStore
 }
+
+// VZEFIVariableStoreInitializationOptionAllowOverwrite mirrors the Objective-C
+// VZEFIVariableStoreInitializationOptions bit for overwriting an existing store.
+const efiVariableStoreAllowOverwrite uint64 = 1 << 0
 
 // EFIVariableStore is EFI variable store.
 // The EFI variable store contains NVRAM variables exposed by the EFI ROM.
@@ -174,18 +163,19 @@ type NewEFIVariableStoreOption func(*EFIVariableStore) error
 // If the variable store already exists in path, it is overwritten.
 func WithCreatingEFIVariableStore() NewEFIVariableStoreOption {
 	return func(es *EFIVariableStore) error {
-		cpath := charWithGoString(es.path)
-		defer cpath.Free()
+		errSlot := objc.NewErrorSlot()
+		defer objc.Free(errSlot)
 
-		nserrPtr := newNSErrorAsNil()
 		es.pointer = objc.NewPointer(
-			C.newCreatingVZEFIVariableStoreAtPath(
-				cpath.CString(),
-				&nserrPtr,
+			objc.New(
+				"VZEFIVariableStore", "initCreatingVariableStoreAtURL:options:error:",
+				objc.FileURL(es.path),
+				efiVariableStoreAllowOverwrite,
+				errSlot,
 			),
 		)
-		if err := newNSError(nserrPtr); err != nil {
-			return err
+		if objc.HasError(errSlot) {
+			return newNSError(objc.ErrorFromSlot(errSlot))
 		}
 		return nil
 	}
@@ -210,10 +200,8 @@ func NewEFIVariableStore(path string, opts ...NewEFIVariableStoreOption) (*EFIVa
 		if _, err := os.Stat(path); err != nil {
 			return nil, err
 		}
-		cpath := charWithGoString(path)
-		defer cpath.Free()
 		variableStore.pointer = objc.NewPointer(
-			C.newVZEFIVariableStorePath(cpath.CString()),
+			objc.New("VZEFIVariableStore", "initWithURL:", objc.FileURL(path)),
 		)
 	}
 	objc.SetFinalizer(variableStore, func(self *EFIVariableStore) {
