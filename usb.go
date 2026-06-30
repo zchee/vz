@@ -1,13 +1,6 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_15.h"
-*/
-import "C"
 import (
-	"runtime/cgo"
 	"unsafe"
 
 	"github.com/Code-Hex/vz/v3/internal/objc"
@@ -21,7 +14,7 @@ func NewUSBMassStorageDevice(config *USBMassStorageDeviceConfiguration) (USBDevi
 	if err := macOSAvailable(15); err != nil {
 		return nil, err
 	}
-	ptr := C.newVZUSBMassStorageDeviceWithConfiguration(objc.Ptr(config))
+	ptr := objc.New("VZUSBMassStorageDevice", "initWithConfiguration:", objc.Ptr(config))
 	return newUSBDevice(ptr), nil
 }
 
@@ -58,7 +51,7 @@ func NewXHCIControllerConfiguration() (*XHCIControllerConfiguration, error) {
 	}
 
 	config := &XHCIControllerConfiguration{
-		pointer: objc.NewPointer(C.newVZXHCIControllerConfiguration()),
+		pointer: objc.NewPointer(objc.New("VZXHCIControllerConfiguration", "init")),
 	}
 
 	objc.SetFinalizer(config, func(self *XHCIControllerConfiguration) {
@@ -80,17 +73,25 @@ func newUSBController(ptr, dispatchQueue unsafe.Pointer) *USBController {
 	}
 }
 
-//export usbAttachDetachCompletionHandler
-func usbAttachDetachCompletionHandler(cgoHandleUintptr C.uintptr_t, errPtr unsafe.Pointer) {
-	cgoHandle := cgo.Handle(cgoHandleUintptr)
-
-	handler := cgoHandle.Value().(func(error))
-
-	if err := newNSError(errPtr); err != nil {
-		handler(err)
-	} else {
-		handler(nil)
-	}
+// attachDetach drives a USB attach or detach through the controller's queue and
+// waits for the completion handler. The completion block is built in Go and
+// captures the result handler directly; it is released only after the handler
+// has fired (the framework retains its own copy across the async completion).
+func (u *USBController) attachDetach(selector string, device USBDevice) error {
+	h, errCh := makeHandler()
+	block := objc.BlockError(func(errPtr unsafe.Pointer) {
+		if err := newNSError(errPtr); err != nil {
+			h(err)
+		} else {
+			h(nil)
+		}
+	})
+	objc.DispatchSync(u.dispatchQueue, func() {
+		objc.SendVoid(objc.Ptr(u), selector, objc.Ptr(device), block)
+	})
+	err := <-errCh
+	block.Release()
+	return err
 }
 
 // Attach attaches a USB device.
@@ -108,16 +109,7 @@ func (u *USBController) Attach(device USBDevice) error {
 	if err := macOSAvailable(15); err != nil {
 		return err
 	}
-	h, errCh := makeHandler()
-	handle := cgo.NewHandle(h)
-	defer handle.Delete()
-	C.attachDeviceVZUSBController(
-		objc.Ptr(u),
-		objc.Ptr(device),
-		u.dispatchQueue,
-		C.uintptr_t(handle),
-	)
-	return <-errCh
+	return u.attachDetach("attachDevice:completionHandler:", device)
 }
 
 // Detach detaches a USB device.
@@ -133,16 +125,7 @@ func (u *USBController) Detach(device USBDevice) error {
 	if err := macOSAvailable(15); err != nil {
 		return err
 	}
-	h, errCh := makeHandler()
-	handle := cgo.NewHandle(h)
-	defer handle.Delete()
-	C.detachDeviceVZUSBController(
-		objc.Ptr(u),
-		objc.Ptr(device),
-		u.dispatchQueue,
-		C.uintptr_t(handle),
-	)
-	return <-errCh
+	return u.attachDetach("detachDevice:completionHandler:", device)
 }
 
 // USBDevices return a list of USB devices attached to controller.
@@ -154,7 +137,7 @@ func (u *USBController) USBDevices() []USBDevice {
 		return nil
 	}
 	nsArray := objc.NewNSArray(
-		C.usbDevicesVZUSBController(objc.Ptr(u)),
+		objc.SendPtr(objc.Ptr(u), "usbDevices"),
 	)
 	ptrs := nsArray.ToPointerSlice()
 	usbDevices := make([]USBDevice, len(ptrs))
@@ -189,6 +172,7 @@ var _ USBDevice = (*usbDevice)(nil)
 
 // UUID returns the device UUID.
 func (u *usbDevice) UUID() string {
-	cs := (*char)(C.getUUIDUSBDevice(objc.Ptr(u)))
-	return cs.String()
+	uuid := objc.SendPtr(objc.Ptr(u), "uuid") // NSUUID
+	str := objc.SendPtr(uuid, "UUIDString")   // NSString
+	return objc.GoString(objc.SendPtr(str, "UTF8String"))
 }

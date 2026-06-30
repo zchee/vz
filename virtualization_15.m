@@ -128,21 +128,7 @@ void *VZVirtualMachine_usbControllers(void *machine)
     It will be also invoked on an virtual machine's queue.
  @see VZUSBDevice
  */
-void attachDeviceVZUSBController(void *usbController, void *usbDevice, void *queue, uintptr_t cgoHandle)
-{
-#ifdef INCLUDE_TARGET_OSX_15
-    if (@available(macOS 15, *)) {
-        dispatch_sync((dispatch_queue_t)queue, ^{
-            [(VZUSBController *)usbController attachDevice:(id<VZUSBDevice>)usbDevice
-                                         completionHandler:^(NSError *error) {
-                                             usbAttachDetachCompletionHandler(cgoHandle, error);
-                                         }];
-        });
-        return;
-    }
-#endif
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* attachDeviceVZUSBController converted to Go in usb.go */
 
 /*!
  @abstract Detach a USB device.
@@ -158,21 +144,7 @@ void attachDeviceVZUSBController(void *usbController, void *usbDevice, void *que
     It will be also invoked on an virtual machine's queue.
  @see VZUSBDevice
  */
-void detachDeviceVZUSBController(void *usbController, void *usbDevice, void *queue, uintptr_t cgoHandle)
-{
-#ifdef INCLUDE_TARGET_OSX_15
-    if (@available(macOS 15, *)) {
-        dispatch_sync((dispatch_queue_t)queue, ^{
-            [(VZUSBController *)usbController detachDevice:(id<VZUSBDevice>)usbDevice
-                                         completionHandler:^(NSError *error) {
-                                             usbAttachDetachCompletionHandler(cgoHandle, error);
-                                         }];
-        });
-        return;
-    }
-#endif
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* detachDeviceVZUSBController converted to Go in usb.go */
 
 /*!
  @abstract Initialize the runtime USB Mass Storage device object.
