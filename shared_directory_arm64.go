@@ -3,16 +3,8 @@
 
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_13_arm64.h"
-# include "virtualization_14_arm64.h"
-*/
-import "C"
 import (
 	"fmt"
-	"runtime/cgo"
 	"unsafe"
 
 	"github.com/Code-Hex/vz/v3/internal/objc"
@@ -34,19 +26,6 @@ const (
 	LinuxRosettaAvailabilityInstalled
 )
 
-//export linuxInstallRosettaWithCompletionHandler
-func linuxInstallRosettaWithCompletionHandler(cgoHandleUintptr C.uintptr_t, errPtr unsafe.Pointer) {
-	cgoHandle := cgo.Handle(cgoHandleUintptr)
-
-	handler := cgoHandle.Value().(func(error))
-
-	if err := newNSError(errPtr); err != nil {
-		handler(err)
-	} else {
-		handler(nil)
-	}
-}
-
 // LinuxRosettaDirectoryShare directory share to enable Rosetta support for Linux binaries.
 // see: https://developer.apple.com/documentation/virtualization/vzlinuxrosettadirectoryshare?language=objc
 type LinuxRosettaDirectoryShare struct {
@@ -66,13 +45,16 @@ func NewLinuxRosettaDirectoryShare() (*LinuxRosettaDirectoryShare, error) {
 	if err := macOSAvailable(13); err != nil {
 		return nil, err
 	}
-	nserrPtr := newNSErrorAsNil()
+
+	errSlot := objc.NewErrorSlot()
+	defer objc.Free(errSlot)
+
 	ds := &LinuxRosettaDirectoryShare{
 		pointer: objc.NewPointer(
-			C.newVZLinuxRosettaDirectoryShare(&nserrPtr),
+			objc.New("VZLinuxRosettaDirectoryShare", "initWithError:", errSlot),
 		),
 	}
-	if err := newNSError(nserrPtr); err != nil {
+	if err := newNSError(objc.ErrorFromSlot(errSlot)); err != nil {
 		return nil, err
 	}
 	objc.SetFinalizer(ds, func(self *LinuxRosettaDirectoryShare) {
@@ -88,7 +70,7 @@ func (ds *LinuxRosettaDirectoryShare) SetOptions(options LinuxRosettaCachingOpti
 	if err := macOSAvailable(14); err != nil {
 		return
 	}
-	C.setOptionsVZLinuxRosettaDirectoryShare(objc.Ptr(ds), objc.Ptr(options))
+	objc.SendVoid(objc.Ptr(ds), "setOptions:", objc.Ptr(options))
 }
 
 // LinuxRosettaDirectoryShareInstallRosetta download and install Rosetta support
@@ -101,11 +83,20 @@ func LinuxRosettaDirectoryShareInstallRosetta() error {
 		return err
 	}
 	errCh := make(chan error, 1)
-	cgoHandle := cgo.NewHandle(func(err error) {
-		errCh <- err
+	block := objc.BlockError(func(errPtr unsafe.Pointer) {
+		if err := newNSError(errPtr); err != nil {
+			errCh <- err
+		} else {
+			errCh <- nil
+		}
 	})
-	C.linuxInstallRosetta(C.uintptr_t(cgoHandle))
-	return <-errCh
+	objc.ID(objc.GetClass("VZLinuxRosettaDirectoryShare")).Send(
+		objc.RegisterName("installRosettaWithCompletionHandler:"),
+		block,
+	)
+	err := <-errCh
+	block.Release()
+	return err
 }
 
 // LinuxRosettaDirectoryShareAvailability checks the availability of Rosetta support
@@ -117,7 +108,12 @@ func LinuxRosettaDirectoryShareAvailability() LinuxRosettaAvailability {
 	if err := macOSAvailable(13); err != nil {
 		return LinuxRosettaAvailabilityNotSupported
 	}
-	return LinuxRosettaAvailability(C.availabilityVZLinuxRosettaDirectoryShare())
+	return LinuxRosettaAvailability(
+		objc.Send[int32](
+			objc.ID(objc.GetClass("VZLinuxRosettaDirectoryShare")),
+			objc.RegisterName("availability"),
+		),
+	)
 }
 
 // LinuxRosettaCachingOptions for a directory sharing device configuration.
@@ -159,16 +155,16 @@ func NewLinuxRosettaUnixSocketCachingOptions(path string) (*LinuxRosettaUnixSock
 		return nil, fmt.Errorf("path length exceeds maximum allowed length of %d", maxPathLen)
 	}
 
-	cs := charWithGoString(path)
-	defer cs.Free()
+	errSlot := objc.NewErrorSlot()
+	defer objc.Free(errSlot)
 
-	nserrPtr := newNSErrorAsNil()
 	usco := &LinuxRosettaUnixSocketCachingOptions{
 		pointer: objc.NewPointer(
-			C.newVZLinuxRosettaUnixSocketCachingOptionsWithPath(cs.CString(), &nserrPtr),
+			objc.New("VZLinuxRosettaUnixSocketCachingOptions", "initWithPath:error:",
+				objc.NSString(path), errSlot),
 		),
 	}
-	if err := newNSError(nserrPtr); err != nil {
+	if err := newNSError(objc.ErrorFromSlot(errSlot)); err != nil {
 		return nil, err
 	}
 	objc.SetFinalizer(usco, func(self *LinuxRosettaUnixSocketCachingOptions) {
@@ -178,7 +174,10 @@ func NewLinuxRosettaUnixSocketCachingOptions(path string) (*LinuxRosettaUnixSock
 }
 
 func maximumPathLengthLinuxRosettaUnixSocketCachingOptions() int {
-	return int(uint32(C.maximumPathLengthVZLinuxRosettaUnixSocketCachingOptions()))
+	return int(objc.Send[uint32](
+		objc.ID(objc.GetClass("VZLinuxRosettaUnixSocketCachingOptions")),
+		objc.RegisterName("maximumPathLength"),
+	))
 }
 
 // LinuxRosettaAbstractSocketCachingOptions is caching options for an abstract socket.
@@ -207,16 +206,16 @@ func NewLinuxRosettaAbstractSocketCachingOptions(name string) (*LinuxRosettaAbst
 		return nil, fmt.Errorf("name length exceeds maximum allowed length of %d", maxNameLen)
 	}
 
-	cs := charWithGoString(name)
-	defer cs.Free()
+	errSlot := objc.NewErrorSlot()
+	defer objc.Free(errSlot)
 
-	nserrPtr := newNSErrorAsNil()
 	asco := &LinuxRosettaAbstractSocketCachingOptions{
 		pointer: objc.NewPointer(
-			C.newVZLinuxRosettaAbstractSocketCachingOptionsWithName(cs.CString(), &nserrPtr),
+			objc.New("VZLinuxRosettaAbstractSocketCachingOptions", "initWithName:error:",
+				objc.NSString(name), errSlot),
 		),
 	}
-	if err := newNSError(nserrPtr); err != nil {
+	if err := newNSError(objc.ErrorFromSlot(errSlot)); err != nil {
 		return nil, err
 	}
 	objc.SetFinalizer(asco, func(self *LinuxRosettaAbstractSocketCachingOptions) {
@@ -226,5 +225,8 @@ func NewLinuxRosettaAbstractSocketCachingOptions(name string) (*LinuxRosettaAbst
 }
 
 func maximumNameLengthVZLinuxRosettaAbstractSocketCachingOptions() int {
-	return int(uint32(C.maximumNameLengthVZLinuxRosettaAbstractSocketCachingOptions()))
+	return int(objc.Send[uint32](
+		objc.ID(objc.GetClass("VZLinuxRosettaAbstractSocketCachingOptions")),
+		objc.RegisterName("maximumNameLength"),
+	))
 }
