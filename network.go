@@ -1,17 +1,11 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_11.h"
-# include "virtualization_13.h"
-*/
-import "C"
 import (
 	"fmt"
 	"net"
 	"os"
 	"syscall"
+	"unsafe"
 
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -43,7 +37,10 @@ type BridgedNetwork interface {
 // be returned on older versions.
 func NetworkInterfaces() []BridgedNetwork {
 	nsArray := objc.NewNSArray(
-		C.VZBridgedNetworkInterface_networkInterfaces(),
+		objc.Send[unsafe.Pointer](
+			objc.ID(objc.GetClass("VZBridgedNetworkInterface")),
+			objc.RegisterName("networkInterfaces"),
+		),
 	)
 	ptrs := nsArray.ToPointerSlice()
 	networkInterfaces := make([]BridgedNetwork, len(ptrs))
@@ -67,16 +64,16 @@ func (*baseBridgedNetwork) NetworkInterfaces() []BridgedNetwork {
 //
 // The identifier is the BSD name associated with the interface (e.g. "en0").
 func (b *baseBridgedNetwork) Identifier() string {
-	cstring := (*char)(C.VZBridgedNetworkInterface_identifier(objc.Ptr(b)))
-	return cstring.String()
+	ns := objc.SendPtr(objc.Ptr(b), "identifier")
+	return objc.Send[string](objc.ID(uintptr(ns)), objc.RegisterName("UTF8String"))
 }
 
 // LocalizedDisplayName returns a display name if available (e.g. "Ethernet").
 //
 // If no display name is available, the identifier is returned.
 func (b *baseBridgedNetwork) LocalizedDisplayName() string {
-	cstring := (*char)(C.VZBridgedNetworkInterface_localizedDisplayName(objc.Ptr(b)))
-	return cstring.String()
+	ns := objc.SendPtr(objc.Ptr(b), "localizedDisplayName")
+	return objc.Send[string](objc.ID(uintptr(ns)), objc.RegisterName("UTF8String"))
 }
 
 // Network device attachment using network address translation (NAT) with outside networks.
@@ -106,7 +103,9 @@ func NewNATNetworkDeviceAttachment() (*NATNetworkDeviceAttachment, error) {
 	}
 
 	attachment := &NATNetworkDeviceAttachment{
-		pointer: objc.NewPointer(C.newVZNATNetworkDeviceAttachment()),
+		pointer: objc.NewPointer(
+			objc.New("VZNATNetworkDeviceAttachment", "init"),
+		),
 	}
 	objc.SetFinalizer(attachment, func(self *NATNetworkDeviceAttachment) {
 		objc.Release(self)
@@ -147,7 +146,9 @@ func NewBridgedNetworkDeviceAttachment(networkInterface BridgedNetwork) (*Bridge
 
 	attachment := &BridgedNetworkDeviceAttachment{
 		pointer: objc.NewPointer(
-			C.newVZBridgedNetworkDeviceAttachment(
+			objc.New(
+				"VZBridgedNetworkDeviceAttachment",
+				"initWithInterface:",
 				objc.Ptr(networkInterface),
 			),
 		),
@@ -192,19 +193,20 @@ func NewFileHandleNetworkDeviceAttachment(file *os.File) (*FileHandleNetworkDevi
 		return nil, err
 	}
 
-	nserrPtr := newNSErrorAsNil()
+	fileHandle, err := newFileHandleDupFd(int(file.Fd()))
+	if err != nil {
+		return nil, err
+	}
 
 	attachment := &FileHandleNetworkDeviceAttachment{
 		pointer: objc.NewPointer(
-			C.newVZFileHandleNetworkDeviceAttachment(
-				C.int(file.Fd()),
-				&nserrPtr,
+			objc.New(
+				"VZFileHandleNetworkDeviceAttachment",
+				"initWithFileHandle:",
+				fileHandle,
 			),
 		),
 		mtu: 1500, // The default MTU is 1500.
-	}
-	if err := newNSError(nserrPtr); err != nil {
-		return nil, err
 	}
 	objc.SetFinalizer(attachment, func(self *FileHandleNetworkDeviceAttachment) {
 		objc.Release(self)
@@ -252,9 +254,10 @@ func (f *FileHandleNetworkDeviceAttachment) SetMaximumTransmissionUnit(mtu int) 
 	if err := macOSAvailable(13); err != nil {
 		return err
 	}
-	C.setMaximumTransmissionUnitVZFileHandleNetworkDeviceAttachment(
+	objc.SendVoid(
 		objc.Ptr(f),
-		C.NSInteger(mtu),
+		"setMaximumTransmissionUnit:",
+		mtu,
 	)
 	f.mtu = mtu
 	return nil
@@ -309,9 +312,8 @@ func NewVirtioNetworkDeviceConfiguration(attachment NetworkDeviceAttachment) (*V
 }
 
 func newVirtioNetworkDeviceConfiguration(attachment NetworkDeviceAttachment) *VirtioNetworkDeviceConfiguration {
-	ptr := C.newVZVirtioNetworkDeviceConfiguration(
-		objc.Ptr(attachment),
-	)
+	ptr := objc.New("VZVirtioNetworkDeviceConfiguration", "init")
+	objc.SendVoid(ptr, "setAttachment:", objc.Ptr(attachment))
 	return &VirtioNetworkDeviceConfiguration{
 		pointer:    objc.NewPointer(ptr),
 		attachment: attachment,
@@ -319,7 +321,8 @@ func newVirtioNetworkDeviceConfiguration(attachment NetworkDeviceAttachment) *Vi
 }
 
 func (v *VirtioNetworkDeviceConfiguration) SetMACAddress(macAddress *MACAddress) {
-	C.setNetworkDevicesVZMACAddress(objc.Ptr(v), objc.Ptr(macAddress))
+	macCopy := objc.SendPtr(objc.Ptr(macAddress), "copy")
+	objc.SendVoid(objc.Ptr(v), "setMACAddress:", macCopy)
 }
 
 func (v *VirtioNetworkDeviceConfiguration) Attachment() NetworkDeviceAttachment {
@@ -341,11 +344,9 @@ func NewMACAddress(macAddr net.HardwareAddr) (*MACAddress, error) {
 		return nil, err
 	}
 
-	macAddrChar := charWithGoString(macAddr.String())
-	defer macAddrChar.Free()
 	ma := &MACAddress{
 		pointer: objc.NewPointer(
-			C.newVZMACAddress(macAddrChar.CString()),
+			objc.New("VZMACAddress", "initWithString:", objc.NSString(macAddr.String())),
 		),
 	}
 	objc.SetFinalizer(ma, func(self *MACAddress) {
@@ -365,7 +366,10 @@ func NewRandomLocallyAdministeredMACAddress() (*MACAddress, error) {
 
 	ma := &MACAddress{
 		pointer: objc.NewPointer(
-			C.newRandomLocallyAdministeredVZMACAddress(),
+			objc.Send[unsafe.Pointer](
+				objc.ID(objc.GetClass("VZMACAddress")),
+				objc.RegisterName("randomLocallyAdministeredAddress"),
+			),
 		),
 	}
 	objc.SetFinalizer(ma, func(self *MACAddress) {
@@ -375,8 +379,8 @@ func NewRandomLocallyAdministeredMACAddress() (*MACAddress, error) {
 }
 
 func (m *MACAddress) String() string {
-	cstring := (*char)(C.getVZMACAddressString(objc.Ptr(m)))
-	return cstring.String()
+	ns := objc.SendPtr(objc.Ptr(m), "string")
+	return objc.Send[string](objc.ID(uintptr(ns)), objc.RegisterName("UTF8String"))
 }
 
 func (m *MACAddress) HardwareAddr() net.HardwareAddr {

@@ -1,12 +1,5 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_11.h"
-# include "virtualization_12.h"
-*/
-import "C"
 import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -48,7 +41,7 @@ func NewVirtioSoundDeviceConfiguration() (*VirtioSoundDeviceConfiguration, error
 	}
 	config := &VirtioSoundDeviceConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZVirtioSoundDeviceConfiguration(),
+			objc.New("VZVirtioSoundDeviceConfiguration", "init"),
 		),
 	}
 	objc.SetFinalizer(config, func(self *VirtioSoundDeviceConfiguration) {
@@ -64,9 +57,8 @@ func (v *VirtioSoundDeviceConfiguration) SetStreams(streams ...VirtioSoundDevice
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setStreamsVZVirtioSoundDeviceConfiguration(
-		objc.Ptr(v), objc.Ptr(array),
-	)
+	streamsCopy := objc.SendPtr(objc.Ptr(array), "copy")
+	objc.SendVoid(objc.Ptr(v), "setStreams:", streamsCopy)
 }
 
 // VirtioSoundDeviceStreamConfiguration interface for Virtio Sound Device Stream Configuration.
@@ -98,10 +90,14 @@ func NewVirtioSoundDeviceHostInputStreamConfiguration() (*VirtioSoundDeviceHostI
 	if err := macOSAvailable(12); err != nil {
 		return nil, err
 	}
+	inputStream := objc.New("VZVirtioSoundDeviceInputStreamConfiguration", "init")
+	objc.SendVoid(
+		inputStream,
+		"setSource:",
+		objc.New("VZHostAudioInputStreamSource", "init"),
+	)
 	config := &VirtioSoundDeviceHostInputStreamConfiguration{
-		pointer: objc.NewPointer(
-			C.newVZVirtioSoundDeviceHostInputStreamConfiguration(),
-		),
+		pointer: objc.NewPointer(inputStream),
 	}
 	objc.SetFinalizer(config, func(self *VirtioSoundDeviceHostInputStreamConfiguration) {
 		objc.Release(self)
@@ -129,10 +125,14 @@ func NewVirtioSoundDeviceHostOutputStreamConfiguration() (*VirtioSoundDeviceHost
 	if err := macOSAvailable(12); err != nil {
 		return nil, err
 	}
+	outputStream := objc.New("VZVirtioSoundDeviceOutputStreamConfiguration", "init")
+	objc.SendVoid(
+		outputStream,
+		"setSink:",
+		objc.New("VZHostAudioOutputStreamSink", "init"),
+	)
 	config := &VirtioSoundDeviceHostOutputStreamConfiguration{
-		pointer: objc.NewPointer(
-			C.newVZVirtioSoundDeviceHostOutputStreamConfiguration(),
-		),
+		pointer: objc.NewPointer(outputStream),
 	}
 	objc.SetFinalizer(config, func(self *VirtioSoundDeviceHostOutputStreamConfiguration) {
 		objc.Release(self)

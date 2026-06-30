@@ -1,12 +1,5 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_11.h"
-# include "virtualization_12.h"
-*/
-import "C"
 import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -40,7 +33,9 @@ func NewUSBKeyboardConfiguration() (*USBKeyboardConfiguration, error) {
 		return nil, err
 	}
 	config := &USBKeyboardConfiguration{
-		pointer: objc.NewPointer(C.newVZUSBKeyboardConfiguration()),
+		pointer: objc.NewPointer(
+			objc.New("VZUSBKeyboardConfiguration", "init"),
+		),
 	}
 	objc.SetFinalizer(config, func(self *USBKeyboardConfiguration) {
 		objc.Release(self)

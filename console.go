@@ -1,11 +1,5 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_13.h"
-*/
-import "C"
 import (
 	"unsafe"
 
@@ -42,11 +36,11 @@ func NewVirtioConsoleDeviceConfiguration() (*VirtioConsoleDeviceConfiguration, e
 	}
 	config := &VirtioConsoleDeviceConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZVirtioConsoleDeviceConfiguration(),
+			objc.New("VZVirtioConsoleDeviceConfiguration", "init"),
 		),
 		consolePorts: make(map[int]*VirtioConsolePortConfiguration),
 	}
-	config.portsPtr = C.portsVZVirtioConsoleDeviceConfiguration(objc.Ptr(config))
+	config.portsPtr = objc.SendPtr(objc.Ptr(config), "ports")
 
 	objc.SetFinalizer(config, func(self *VirtioConsoleDeviceConfiguration) {
 		objc.Release(self)
@@ -57,14 +51,18 @@ func NewVirtioConsoleDeviceConfiguration() (*VirtioConsoleDeviceConfiguration, e
 // MaximumPortCount returns the maximum number of ports allocated by this device.
 // The default is the number of ports attached to this device.
 func (v *VirtioConsoleDeviceConfiguration) MaximumPortCount() uint32 {
-	return uint32(C.maximumPortCountVZVirtioConsolePortConfigurationArray(v.portsPtr))
+	return objc.Send[uint32](
+		objc.ID(uintptr(v.portsPtr)),
+		objc.RegisterName("maximumPortCount"),
+	)
 }
 
 func (v *VirtioConsoleDeviceConfiguration) SetVirtioConsolePortConfiguration(idx int, portConfig *VirtioConsolePortConfiguration) {
-	C.setObjectAtIndexedSubscriptVZVirtioConsolePortConfigurationArray(
+	objc.SendVoid(
 		v.portsPtr,
+		"setObject:atIndexedSubscript:",
 		objc.Ptr(portConfig),
-		C.int(idx),
+		idx,
 	)
 
 	// to mark as currently reachable.
@@ -105,11 +103,10 @@ type NewVirtioConsolePortConfigurationOption func(*VirtioConsolePortConfiguratio
 // The default behavior is to not use a name unless set.
 func WithVirtioConsolePortConfigurationName(name string) NewVirtioConsolePortConfigurationOption {
 	return func(vcpc *VirtioConsolePortConfiguration) {
-		consolePortName := charWithGoString(name)
-		defer consolePortName.Free()
-		C.setNameVZVirtioConsolePortConfiguration(
+		objc.SendVoid(
 			objc.Ptr(vcpc),
-			consolePortName.CString(),
+			"setName:",
+			objc.NSString(name),
 		)
 		vcpc.name = name
 	}
@@ -119,9 +116,10 @@ func WithVirtioConsolePortConfigurationName(name string) NewVirtioConsolePortCon
 // for use as the system console. The default is false.
 func WithVirtioConsolePortConfigurationIsConsole(isConsole bool) NewVirtioConsolePortConfigurationOption {
 	return func(vcpc *VirtioConsolePortConfiguration) {
-		C.setIsConsoleVZVirtioConsolePortConfiguration(
+		objc.SendVoid(
 			objc.Ptr(vcpc),
-			C.bool(isConsole),
+			"setIsConsole:",
+			isConsole,
 		)
 		vcpc.isConsole = isConsole
 	}
@@ -131,8 +129,9 @@ func WithVirtioConsolePortConfigurationIsConsole(isConsole bool) NewVirtioConsol
 // The default is nil.
 func WithVirtioConsolePortConfigurationAttachment(attachment SerialPortAttachment) NewVirtioConsolePortConfigurationOption {
 	return func(vcpc *VirtioConsolePortConfiguration) {
-		C.setAttachmentVZVirtioConsolePortConfiguration(
+		objc.SendVoid(
 			objc.Ptr(vcpc),
+			"setAttachment:",
 			objc.Ptr(attachment),
 		)
 		vcpc.attachment = attachment
@@ -149,7 +148,7 @@ func NewVirtioConsolePortConfiguration(opts ...NewVirtioConsolePortConfiguration
 	}
 	vcpc := &VirtioConsolePortConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZVirtioConsolePortConfiguration(),
+			objc.New("VZVirtioConsolePortConfiguration", "init"),
 		),
 	}
 	for _, optFunc := range opts {

@@ -1,13 +1,9 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_11.h"
-*/
-import "C"
 import (
 	"os"
+	"syscall"
+	"unsafe"
 
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -49,18 +45,24 @@ func NewFileHandleSerialPortAttachment(read, write *os.File) (*FileHandleSerialP
 		return nil, err
 	}
 
-	nserrPtr := newNSErrorAsNil()
+	readHandle, err := newFileHandleDupFd(int(read.Fd()))
+	if err != nil {
+		return nil, err
+	}
+	writeHandle, err := newFileHandleDupFd(int(write.Fd()))
+	if err != nil {
+		return nil, err
+	}
+
 	attachment := &FileHandleSerialPortAttachment{
 		pointer: objc.NewPointer(
-			C.newVZFileHandleSerialPortAttachment(
-				C.int(read.Fd()),
-				C.int(write.Fd()),
-				&nserrPtr,
+			objc.New(
+				"VZFileHandleSerialPortAttachment",
+				"initWithFileHandleForReading:fileHandleForWriting:",
+				readHandle,
+				writeHandle,
 			),
 		),
-	}
-	if err := newNSError(nserrPtr); err != nil {
-		return nil, err
 	}
 	objc.SetFinalizer(attachment, func(self *FileHandleSerialPortAttachment) {
 		objc.Release(self)
@@ -95,21 +97,22 @@ func NewFileSerialPortAttachment(path string, shouldAppend bool) (*FileSerialPor
 		return nil, err
 	}
 
-	cpath := charWithGoString(path)
-	defer cpath.Free()
+	errSlot := objc.NewErrorSlot()
+	defer objc.Free(errSlot)
 
-	nserrPtr := newNSErrorAsNil()
 	attachment := &FileSerialPortAttachment{
 		pointer: objc.NewPointer(
-			C.newVZFileSerialPortAttachment(
-				cpath.CString(),
-				C.bool(shouldAppend),
-				&nserrPtr,
+			objc.New(
+				"VZFileSerialPortAttachment",
+				"initWithURL:append:error:",
+				objc.FileURL(path),
+				shouldAppend,
+				errSlot,
 			),
 		),
 	}
-	if err := newNSError(nserrPtr); err != nil {
-		return nil, err
+	if objc.HasError(errSlot) {
+		return nil, newNSError(objc.ErrorFromSlot(errSlot))
 	}
 	objc.SetFinalizer(attachment, func(self *FileSerialPortAttachment) {
 		objc.Release(self)
@@ -135,15 +138,30 @@ func NewVirtioConsoleDeviceSerialPortConfiguration(attachment SerialPortAttachme
 		return nil, err
 	}
 
+	ptr := objc.New("VZVirtioConsoleDeviceSerialPortConfiguration", "init")
+	objc.SendVoid(ptr, "setAttachment:", objc.Ptr(attachment))
 	config := &VirtioConsoleDeviceSerialPortConfiguration{
-		pointer: objc.NewPointer(
-			C.newVZVirtioConsoleDeviceSerialPortConfiguration(
-				objc.Ptr(attachment),
-			),
-		),
+		pointer: objc.NewPointer(ptr),
 	}
 	objc.SetFinalizer(config, func(self *VirtioConsoleDeviceSerialPortConfiguration) {
 		objc.Release(self)
 	})
 	return config, nil
+}
+
+// newFileHandleDupFd duplicates fd and wraps it in an NSFileHandle that closes
+// the duplicate when it is deallocated. It mirrors the Objective-C
+// newFileHandleDupFd helper: dup(2) the descriptor so the NSFileHandle owns an
+// independent copy, then -[NSFileHandle initWithFileDescriptor:closeOnDealloc:].
+func newFileHandleDupFd(fd int) (unsafe.Pointer, error) {
+	dupedFd, err := syscall.Dup(fd)
+	if err != nil {
+		return nil, os.NewSyscallError("dup", err)
+	}
+	return objc.New(
+		"NSFileHandle",
+		"initWithFileDescriptor:closeOnDealloc:",
+		dupedFd,
+		true,
+	), nil
 }

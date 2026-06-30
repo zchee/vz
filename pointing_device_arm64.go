@@ -3,12 +3,6 @@
 
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_13_arm64.h"
-*/
-import "C"
 import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -41,7 +35,7 @@ func NewMacTrackpadConfiguration() (*MacTrackpadConfiguration, error) {
 	}
 	config := &MacTrackpadConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZMacTrackpadConfiguration(),
+			objc.New("VZMacTrackpadConfiguration", "init"),
 		),
 	}
 	objc.SetFinalizer(config, func(self *MacTrackpadConfiguration) {
