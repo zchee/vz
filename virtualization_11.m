@@ -141,24 +141,7 @@
 }
 @end
 
-@implementation VZVirtioSocketListenerDelegateImpl {
-    uintptr_t _cgoHandle;
-}
-
-- (instancetype)initWithHandle:(uintptr_t)cgoHandle
-{
-    self = [super init];
-    if (self) {
-        _cgoHandle = cgoHandle;
-    }
-    return self;
-}
-
-- (BOOL)listener:(VZVirtioSocketListener *)listener shouldAcceptNewConnection:(VZVirtioSocketConnection *)connection fromSocketDevice:(VZVirtioSocketDevice *)socketDevice;
-{
-    return (BOOL)shouldAcceptNewConnectionHandler(_cgoHandle, connection, socketDevice);
-}
-@end
+/* VZVirtioSocketListenerDelegateImpl converted to Go in socket.go */
 
 /*!
  @abstract Create a VZLinuxBootLoader with the Linux kernel passed as URL.
@@ -750,16 +733,7 @@ void *newVZVirtioSocketDeviceConfiguration()
  @see VZVirtioSocketDevice
  @see VZVirtioSocketListenerDelegate
  */
-void *newVZVirtioSocketListener(uintptr_t cgoHandle)
-{
-    if (@available(macOS 11, *)) {
-        VZVirtioSocketListener *ret = [[VZVirtioSocketListener alloc] init];
-        [ret setDelegate:[[[VZVirtioSocketListenerDelegateImpl alloc] initWithHandle:cgoHandle] autorelease]];
-        return ret;
-    }
-
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* newVZVirtioSocketListener converted to Go in socket.go */
 
 /*!
  @abstract Sets a listener at a specified port.
@@ -806,20 +780,7 @@ void VZVirtioSocketDevice_removeSocketListenerForPort(void *socketDevice, void *
  @param completionHandler Block called after the connection has been successfully established or on error.
     The error parameter passed to the block is nil if the connection was successful.
  */
-void VZVirtioSocketDevice_connectToPort(void *socketDevice, void *vmQueue, uint32_t port, uintptr_t cgoHandle)
-{
-    if (@available(macOS 11, *)) {
-        dispatch_async((dispatch_queue_t)vmQueue, ^{
-            [(VZVirtioSocketDevice *)socketDevice connectToPort:port
-                                              completionHandler:^(VZVirtioSocketConnection *connection, NSError *err) {
-                                                  connectionHandler(connection, err, cgoHandle);
-                                              }];
-        });
-        return;
-    }
-
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* VZVirtioSocketDevice_connectToPort converted to Go in socket.go */
 
 VZVirtioSocketConnectionFlat convertVZVirtioSocketConnection2Flat(void *connection)
 {
