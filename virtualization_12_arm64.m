@@ -7,18 +7,7 @@
 #ifdef __arm64__
 #import "virtualization_12_arm64.h"
 
-@implementation ProgressObserver
-- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context;
-{
-    if ([keyPath isEqualToString:@"fractionCompleted"] && [object isKindOfClass:[NSProgress class]]) {
-        NSProgress *progress = (NSProgress *)object;
-        macOSInstallFractionCompletedHandler((uintptr_t)context, progress.fractionCompleted);
-        if (progress.finished) {
-            [progress removeObserver:self forKeyPath:@"fractionCompleted"];
-        }
-    }
-}
-@end
+/* ProgressObserver converted to Go in virtualization_arm64.go */
 
 /*!
  @abstract Write an initialized VZMacAuxiliaryStorage to a storagePath on a file system.
@@ -333,34 +322,8 @@ VZMacOSRestoreImageStruct convertVZMacOSRestoreImage2Struct(void *restoreImagePt
     RAISE_UNSUPPORTED_MACOS_EXCEPTION();
 }
 
-void fetchLatestSupportedMacOSRestoreImageWithCompletionHandler(uintptr_t cgoHandle)
-{
-    if (@available(macOS 12, *)) {
-        [VZMacOSRestoreImage fetchLatestSupportedWithCompletionHandler:^(VZMacOSRestoreImage *restoreImage, NSError *error) {
-            VZMacOSRestoreImageStruct restoreImageStruct = convertVZMacOSRestoreImage2Struct(restoreImage);
-            macOSRestoreImageCompletionHandler(cgoHandle, &restoreImageStruct, error);
-        }];
-        return;
-    }
-
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
-
-void loadMacOSRestoreImageFile(const char *ipswPath, uintptr_t cgoHandle)
-{
-    if (@available(macOS 12, *)) {
-        NSString *ipswPathNSString = [NSString stringWithUTF8String:ipswPath];
-        NSURL *ipswURL = [NSURL fileURLWithPath:ipswPathNSString];
-        [VZMacOSRestoreImage loadFileURL:ipswURL
-                       completionHandler:^(VZMacOSRestoreImage *restoreImage, NSError *error) {
-                           VZMacOSRestoreImageStruct restoreImageStruct = convertVZMacOSRestoreImage2Struct(restoreImage);
-                           macOSRestoreImageCompletionHandler(cgoHandle, &restoreImageStruct, error);
-                       }];
-        return;
-    }
-
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* fetchLatestSupportedMacOSRestoreImageWithCompletionHandler and
+   loadMacOSRestoreImageFile converted to Go in virtualization_arm64.go */
 
 VZMacOSConfigurationRequirementsStruct convertVZMacOSConfigurationRequirements2Struct(void *requirementsPtr)
 {
@@ -418,30 +381,8 @@ void *newVZMacOSInstaller(void *virtualMachine, void *vmQueue, const char *resto
     RAISE_UNSUPPORTED_MACOS_EXCEPTION();
 }
 
-void *newProgressObserverVZMacOSInstaller()
-{
-    return [[ProgressObserver alloc] init];
-}
-
-void installByVZMacOSInstaller(void *installerPtr, void *vmQueue, void *progressObserverPtr, uintptr_t completionHandler, uintptr_t fractionCompletedHandler)
-{
-    if (@available(macOS 12, *)) {
-        VZMacOSInstaller *installer = (VZMacOSInstaller *)installerPtr;
-        dispatch_sync((dispatch_queue_t)vmQueue, ^{
-            [installer installWithCompletionHandler:^(NSError *error) {
-                macOSInstallCompletionHandler(completionHandler, error);
-            }];
-            [installer.progress
-                addObserver:(ProgressObserver *)progressObserverPtr
-                 forKeyPath:@"fractionCompleted"
-                    options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew
-                    context:(void *)fractionCompletedHandler];
-        });
-        return;
-    }
-
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* newProgressObserverVZMacOSInstaller and installByVZMacOSInstaller converted to
+   Go in virtualization_arm64.go */
 
 void cancelInstallVZMacOSInstaller(void *installerPtr)
 {

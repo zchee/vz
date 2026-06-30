@@ -22,6 +22,7 @@ var (
 	classNSMutableDictionary pobjc.Class
 	classNSString            pobjc.Class
 	classNSUUID              pobjc.Class
+	classNSData              pobjc.Class
 
 	selAlloc                pobjc.SEL
 	selInit                 pobjc.SEL
@@ -36,6 +37,9 @@ var (
 	selUUID                 pobjc.SEL
 	selUUIDString           pobjc.SEL
 	selUTF8String           pobjc.SEL
+	selInitWithBytesLength  pobjc.SEL
+	selBytes                pobjc.SEL
+	selLength               pobjc.SEL
 
 	// dispatchRelease is bound to libdispatch's dispatch_release when present.
 	dispatchRelease func(unsafe.Pointer)
@@ -50,6 +54,7 @@ func init() {
 	classNSMutableDictionary = pobjc.GetClass("NSMutableDictionary")
 	classNSString = pobjc.GetClass("NSString")
 	classNSUUID = pobjc.GetClass("NSUUID")
+	classNSData = pobjc.GetClass("NSData")
 
 	selAlloc = pobjc.RegisterName("alloc")
 	selInit = pobjc.RegisterName("init")
@@ -64,6 +69,9 @@ func init() {
 	selUUID = pobjc.RegisterName("UUID")
 	selUUIDString = pobjc.RegisterName("UUIDString")
 	selUTF8String = pobjc.RegisterName("UTF8String")
+	selInitWithBytesLength = pobjc.RegisterName("initWithBytes:length:")
+	selBytes = pobjc.RegisterName("bytes")
+	selLength = pobjc.RegisterName("length")
 
 	if sym, err := purego.Dlsym(purego.RTLD_DEFAULT, "dispatch_release"); err == nil && sym != 0 {
 		purego.RegisterFunc(&dispatchRelease, sym)

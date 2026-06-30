@@ -1,17 +1,7 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization -framework Cocoa
-# include "virtualization_11.h"
-# include "virtualization_12.h"
-# include "virtualization_13.h"
-# include "virtualization_15.h"
-*/
-import "C"
 import (
 	"fmt"
-	"runtime/cgo"
 	"sync"
 	"unsafe"
 
@@ -69,6 +59,15 @@ const (
 	VirtualMachineStateRestoring
 )
 
+// nsKeyValueObservingOptionNew mirrors NSKeyValueObservingOptionNew.
+const nsKeyValueObservingOptionNew = 1 << 0
+
+// nsKeyValueObservingOptionInitial mirrors NSKeyValueObservingOptionInitial.
+const nsKeyValueObservingOptionInitial = 1 << 2
+
+// nsNotFound mirrors Foundation's NSNotFound (NSIntegerMax).
+const nsNotFound = int(^uint(0) >> 1)
+
 // VirtualMachine represents the entire state of a single virtual machine.
 //
 // A Virtual Machine is the emulation of a complete hardware machine of the same architecture as the real hardware machine.
@@ -94,6 +93,14 @@ type VirtualMachine struct {
 	dispatchQueue unsafe.Pointer
 	machineState  *machineState
 
+	// stateObserver is the KVO observer watching the "state" property, and
+	// networkDelegate is the VM delegate receiving network-disconnect events.
+	// The Virtualization framework retains neither (KVO does not retain its
+	// observer, and VZVirtualMachine.delegate is a weak reference), so they are
+	// held here for the VM's lifetime and torn down in finalize.
+	stateObserver   unsafe.Pointer
+	networkDelegate unsafe.Pointer
+
 	disconnectedIn        *infinity.Channel[*disconnected]
 	disconnectedOut       *infinity.Channel[*DisconnectedError]
 	watchDisconnectedOnce sync.Once
@@ -112,6 +119,101 @@ type machineState struct {
 	mu sync.RWMutex
 }
 
+// vmStateObserver is the Go-defined Objective-C class that observes a
+// VZVirtualMachine's "state" property via KVO. Its single method publishes each
+// new state to the machineState associated with the observer instance.
+var (
+	vmStateObserverClass objc.Class
+	vmStateObserverOnce  sync.Once
+)
+
+func vmStateObserver() objc.Class {
+	vmStateObserverOnce.Do(func() {
+		cls, err := objc.DefineClass(
+			"VZVirtualMachineStateObserverGo",
+			objc.NSObjectClass(),
+			[]objc.MethodDef{{
+				Cmd: objc.RegisterName("observeValueForKeyPath:ofObject:change:context:"),
+				Fn:  vmStateObserve,
+			}},
+		)
+		if err != nil {
+			panic("vz: failed to define VM state observer: " + err.Error())
+		}
+		vmStateObserverClass = cls
+	})
+	return vmStateObserverClass
+}
+
+// vmStateObserve implements
+// -[observer observeValueForKeyPath:ofObject:change:context:]. It reads the new
+// VZVirtualMachineState from the KVO change dictionary and publishes it.
+func vmStateObserve(self objc.ID, _ objc.SEL, _, _, change, _ unsafe.Pointer) {
+	ms, ok := objc.Associated(uintptr(self)).(*machineState)
+	if !ok {
+		return
+	}
+	// change[NSKeyValueChangeNewKey] is the boxed new "state" value.
+	newValue := objc.SendPtr(change, "objectForKey:", objc.NSString("new"))
+	newState := VirtualMachineState(
+		objc.Send[int](objc.ID(uintptr(newValue)), objc.RegisterName("integerValue")),
+	)
+	ms.mu.Lock()
+	ms.state = newState
+	ms.stateNotify.In() <- newState
+	ms.mu.Unlock()
+}
+
+// vmNetworkDelegate is the Go-defined Objective-C class set as the
+// VZVirtualMachine delegate. It forwards network-attachment disconnect events to
+// the disconnected channel associated with the delegate instance.
+var (
+	vmNetworkDelegateClass objc.Class
+	vmNetworkDelegateOnce  sync.Once
+)
+
+func vmNetworkDelegate() objc.Class {
+	vmNetworkDelegateOnce.Do(func() {
+		cls, err := objc.DefineClass(
+			"VZVirtualMachineNetworkDelegateGo",
+			objc.NSObjectClass(),
+			[]objc.MethodDef{{
+				Cmd: objc.RegisterName("virtualMachine:networkDevice:attachmentWasDisconnectedWithError:"),
+				Fn:  vmNetworkAttachmentDisconnected,
+			}},
+		)
+		if err != nil {
+			panic("vz: failed to define VM network delegate: " + err.Error())
+		}
+		vmNetworkDelegateClass = cls
+	})
+	return vmNetworkDelegateClass
+}
+
+// vmNetworkAttachmentDisconnected implements
+// -[delegate virtualMachine:networkDevice:attachmentWasDisconnectedWithError:].
+// It resolves the index of the disconnected network device within the VM's
+// networkDevices and forwards the event with that index.
+func vmNetworkAttachmentDisconnected(self objc.ID, _ objc.SEL, vm, networkDevice, errPtr unsafe.Pointer) {
+	ch, ok := objc.Associated(uintptr(self)).(*infinity.Channel[*disconnected])
+	if !ok {
+		return
+	}
+	devices := objc.SendPtr(vm, "networkDevices")
+	index := objc.Send[int](
+		objc.ID(uintptr(devices)),
+		objc.RegisterName("indexOfObject:"),
+		networkDevice,
+	)
+	if index == nsNotFound {
+		index = -1
+	}
+	ch.In() <- &disconnected{
+		err:   newNSError(errPtr),
+		index: index,
+	}
+}
+
 // NewVirtualMachine creates a new VirtualMachine with VirtualMachineConfiguration.
 //
 // The configuration must be valid. Validation can be performed at runtime with (*VirtualMachineConfiguration).Validate() method.
@@ -124,32 +226,47 @@ func NewVirtualMachine(config *VirtualMachineConfiguration) (*VirtualMachine, er
 		return nil, err
 	}
 
-	// should not call Free function for this string.
-	cs := (*char)(objc.GetUUID())
-	dispatchQueue := C.makeDispatchQueue(cs.CString())
+	label := objc.GoString(objc.GetUUID())
+	dispatchQueue := objc.DispatchQueueCreate(label)
 
 	machineState := &machineState{
 		state:       VirtualMachineState(0),
 		stateNotify: infinity.NewChannel[VirtualMachineState](),
 	}
-	stateHandle := cgo.NewHandle(machineState)
 
 	disconnectedIn := infinity.NewChannel[*disconnected]()
 	disconnectedOut := infinity.NewChannel[*DisconnectedError]()
-	disconnectedHandle := cgo.NewHandle(disconnectedIn)
+
+	vmPtr := objc.New(
+		"VZVirtualMachine", "initWithConfiguration:queue:",
+		objc.Ptr(config),
+		dispatchQueue,
+	)
+
+	// Observe "state" so VM transitions are published to machineState.
+	stateObserver := objc.NewObject(vmStateObserver())
+	objc.Associate(uintptr(stateObserver), machineState)
+	objc.SendVoid(
+		vmPtr, "addObserver:forKeyPath:options:context:",
+		stateObserver,
+		objc.NSString("state"),
+		uint(nsKeyValueObservingOptionNew),
+		unsafe.Pointer(nil),
+	)
+
+	// Install the network-disconnect delegate. delegate is a weak property, so
+	// networkDelegate must outlive the VM; it is released in finalize.
+	networkDelegate := objc.NewObject(vmNetworkDelegate())
+	objc.Associate(uintptr(networkDelegate), disconnectedIn)
+	objc.SendVoid(vmPtr, "setDelegate:", networkDelegate)
 
 	v := &VirtualMachine{
-		id: cs.String(),
-		pointer: objc.NewPointer(
-			C.newVZVirtualMachineWithDispatchQueue(
-				objc.Ptr(config),
-				dispatchQueue,
-				C.uintptr_t(stateHandle),
-				C.uintptr_t(disconnectedHandle),
-			),
-		),
+		id:              label,
+		pointer:         objc.NewPointer(vmPtr),
 		dispatchQueue:   dispatchQueue,
 		machineState:    machineState,
+		stateObserver:   stateObserver,
+		networkDelegate: networkDelegate,
 		disconnectedIn:  disconnectedIn,
 		disconnectedOut: disconnectedOut,
 		config:          config,
@@ -157,15 +274,24 @@ func NewVirtualMachine(config *VirtualMachineConfiguration) (*VirtualMachine, er
 
 	objc.SetFinalizer(v, func(self *VirtualMachine) {
 		self.finalize()
-		stateHandle.Delete()
 	})
 	return v, nil
 }
 
 func (v *VirtualMachine) finalize() {
 	v.finalizeOnce.Do(func() {
+		// KVO requires removing the observer before the observed VM deallocates.
+		objc.SendVoid(objc.Ptr(v), "removeObserver:forKeyPath:",
+			v.stateObserver, objc.NSString("state"))
 		objc.ReleaseDispatch(v.dispatchQueue)
 		objc.Release(v)
+		// The observer and delegate are not retained by the framework, so they
+		// are released here now that the VM is gone, and their associated Go
+		// state is dropped.
+		objc.SendVoid(v.stateObserver, "release")
+		objc.SendVoid(v.networkDelegate, "release")
+		objc.Disassociate(uintptr(v.stateObserver))
+		objc.Disassociate(uintptr(v.networkDelegate))
 	})
 }
 
@@ -177,7 +303,7 @@ func (v *VirtualMachine) finalize() {
 // see: https://developer.apple.com/documentation/virtualization/vzvirtualmachine/3656702-socketdevices?language=objc
 func (v *VirtualMachine) SocketDevices() []*VirtioSocketDevice {
 	nsArray := objc.NewNSArray(
-		C.VZVirtualMachine_socketDevices(objc.Ptr(v)),
+		objc.SendPtr(objc.Ptr(v), "socketDevices"),
 	)
 	ptrs := nsArray.ToPointerSlice()
 	socketDevices := make([]*VirtioSocketDevice, len(ptrs))
@@ -196,7 +322,7 @@ func (v *VirtualMachine) USBControllers() []*USBController {
 		return nil
 	}
 	nsArray := objc.NewNSArray(
-		C.VZVirtualMachine_usbControllers(objc.Ptr(v)),
+		objc.SendPtr(objc.Ptr(v), "usbControllers"),
 	)
 	ptrs := nsArray.ToPointerSlice()
 	usbControllers := make([]*USBController, len(ptrs))
@@ -204,20 +330,6 @@ func (v *VirtualMachine) USBControllers() []*USBController {
 		usbControllers[i] = newUSBController(ptr, v.dispatchQueue)
 	}
 	return usbControllers
-}
-
-
-//export changeStateOnObserver
-func changeStateOnObserver(newStateRaw C.int, cgoHandleUintptr C.uintptr_t) {
-	stateHandle := cgo.Handle(cgoHandleUintptr)
-	// I expected it will not cause panic.
-	// if caused panic, that's unexpected behavior.
-	v, _ := stateHandle.Value().(*machineState)
-	v.mu.Lock()
-	newState := VirtualMachineState(newStateRaw)
-	v.state = newState
-	v.stateNotify.In() <- newState
-	v.mu.Unlock()
 }
 
 // State represents execution state of the virtual machine.
@@ -234,25 +346,26 @@ func (v *VirtualMachine) StateChangedNotify() <-chan VirtualMachineState {
 	return v.machineState.stateNotify.Out()
 }
 
-// CanStart returns true if the machine is in a state that can be started.
-func (v *VirtualMachine) CanStart() bool {
-	return bool(C.vmCanStart(objc.Ptr(v), v.dispatchQueue))
+// canDispatch reads a boolean VZVirtualMachine property on the VM's serial queue.
+func (v *VirtualMachine) canDispatch(sel string) bool {
+	var ret bool
+	objc.DispatchSync(v.dispatchQueue, func() {
+		ret = objc.Send[bool](objc.ID(uintptr(objc.Ptr(v))), objc.RegisterName(sel))
+	})
+	return ret
 }
+
+// CanStart returns true if the machine is in a state that can be started.
+func (v *VirtualMachine) CanStart() bool { return v.canDispatch("canStart") }
 
 // CanPause returns true if the machine is in a state that can be paused.
-func (v *VirtualMachine) CanPause() bool {
-	return bool(C.vmCanPause(objc.Ptr(v), v.dispatchQueue))
-}
+func (v *VirtualMachine) CanPause() bool { return v.canDispatch("canPause") }
 
 // CanResume returns true if the machine is in a state that can be resumed.
-func (v *VirtualMachine) CanResume() bool {
-	return (bool)(C.vmCanResume(objc.Ptr(v), v.dispatchQueue))
-}
+func (v *VirtualMachine) CanResume() bool { return v.canDispatch("canResume") }
 
 // CanRequestStop returns whether the machine is in a state where the guest can be asked to stop.
-func (v *VirtualMachine) CanRequestStop() bool {
-	return (bool)(C.vmCanRequestStop(objc.Ptr(v), v.dispatchQueue))
-}
+func (v *VirtualMachine) CanRequestStop() bool { return v.canDispatch("canRequestStop") }
 
 // CanStop returns whether the machine is in a state that can be stopped.
 //
@@ -262,20 +375,7 @@ func (v *VirtualMachine) CanStop() bool {
 	if err := macOSAvailable(12); err != nil {
 		return false
 	}
-	return (bool)(C.vmCanStop(objc.Ptr(v), v.dispatchQueue))
-}
-
-//export virtualMachineCompletionHandler
-func virtualMachineCompletionHandler(cgoHandleUintptr C.uintptr_t, errPtr unsafe.Pointer) {
-	cgoHandle := cgo.Handle(cgoHandleUintptr)
-
-	handler := cgoHandle.Value().(func(error))
-
-	if err := newNSError(errPtr); err != nil {
-		handler(err)
-	} else {
-		handler(nil)
-	}
+	return v.canDispatch("canStop")
 }
 
 func makeHandler() (func(error), chan error) {
@@ -284,6 +384,18 @@ func makeHandler() (func(error), chan error) {
 		ch <- err
 		close(ch)
 	}, ch
+}
+
+// completionBlockError builds a void(^)(NSError *) completion block that
+// forwards the framework's error (or nil) to ch exactly once.
+func completionBlockError(ch chan error) objc.Block {
+	return objc.BlockError(func(errPtr unsafe.Pointer) {
+		if err := newNSError(errPtr); err != nil {
+			ch <- err
+		} else {
+			ch <- nil
+		}
+	})
 }
 
 type virtualMachineStartOptions struct {
@@ -307,43 +419,48 @@ func (v *VirtualMachine) Start(opts ...VirtualMachineStartOption) error {
 		}
 	}
 
-	h, errCh := makeHandler()
-	handle := cgo.NewHandle(h)
-	defer handle.Delete()
+	errCh := make(chan error, 1)
+	block := completionBlockError(errCh)
+	objc.DispatchSync(v.dispatchQueue, func() {
+		if o.macOSVirtualMachineStartOptionsPtr != nil {
+			objc.SendVoid(objc.Ptr(v), "startWithOptions:completionHandler:",
+				o.macOSVirtualMachineStartOptionsPtr, block)
+		} else {
+			objc.SendVoid(objc.Ptr(v), "startWithCompletionHandler:", block)
+		}
+	})
+	err := <-errCh
+	block.Release()
+	return err
+}
 
-	if o.macOSVirtualMachineStartOptionsPtr != nil {
-		C.startWithOptionsCompletionHandler(
-			objc.Ptr(v),
-			v.dispatchQueue,
-			o.macOSVirtualMachineStartOptionsPtr,
-			C.uintptr_t(handle),
-		)
-	} else {
-		C.startWithCompletionHandler(objc.Ptr(v), v.dispatchQueue, C.uintptr_t(handle))
-	}
-	return <-errCh
+// lifecycle issues a control selector taking a single completionHandler: on the
+// VM's queue and waits for the completion handler to fire. The completion block
+// is released only after the result has been received; the framework retains its
+// own copy across the asynchronous completion.
+func (v *VirtualMachine) lifecycle(sel string) error {
+	errCh := make(chan error, 1)
+	block := completionBlockError(errCh)
+	objc.DispatchSync(v.dispatchQueue, func() {
+		objc.SendVoid(objc.Ptr(v), sel, block)
+	})
+	err := <-errCh
+	block.Release()
+	return err
 }
 
 // Pause a virtual machine that is in Running state.
 //
 // If you want to listen status change events, use the "StateChangedNotify" method.
 func (v *VirtualMachine) Pause() error {
-	h, errCh := makeHandler()
-	handle := cgo.NewHandle(h)
-	defer handle.Delete()
-	C.pauseWithCompletionHandler(objc.Ptr(v), v.dispatchQueue, C.uintptr_t(handle))
-	return <-errCh
+	return v.lifecycle("pauseWithCompletionHandler:")
 }
 
 // Resume a virtual machine that is in the Paused state.
 //
 // If you want to listen status change events, use the "StateChangedNotify" method.
 func (v *VirtualMachine) Resume() error {
-	h, errCh := makeHandler()
-	handle := cgo.NewHandle(h)
-	defer handle.Delete()
-	C.resumeWithCompletionHandler(objc.Ptr(v), v.dispatchQueue, C.uintptr_t(handle))
-	return <-errCh
+	return v.lifecycle("resumeWithCompletionHandler:")
 }
 
 // RequestStop requests that the guest turns itself off.
@@ -351,9 +468,17 @@ func (v *VirtualMachine) Resume() error {
 // If returned error is not nil, assigned with the error if the request failed.
 // Returns true if the request was made successfully.
 func (v *VirtualMachine) RequestStop() (bool, error) {
-	nserrPtr := newNSErrorAsNil()
-	ret := (bool)(C.requestStopVirtualMachine(objc.Ptr(v), v.dispatchQueue, &nserrPtr))
-	if err := newNSError(nserrPtr); err != nil {
+	errSlot := objc.NewErrorSlot()
+	defer objc.Free(errSlot)
+	var ret bool
+	objc.DispatchSync(v.dispatchQueue, func() {
+		ret = objc.Send[bool](
+			objc.ID(uintptr(objc.Ptr(v))),
+			objc.RegisterName("requestStopWithError:"),
+			errSlot,
+		)
+	})
+	if err := newNSError(objc.ErrorFromSlot(errSlot)); err != nil {
 		return ret, err
 	}
 	return ret, nil
@@ -374,63 +499,7 @@ func (v *VirtualMachine) Stop() error {
 	if err := macOSAvailable(12); err != nil {
 		return err
 	}
-	h, errCh := makeHandler()
-	handle := cgo.NewHandle(h)
-	defer handle.Delete()
-	C.stopWithCompletionHandler(objc.Ptr(v), v.dispatchQueue, C.uintptr_t(handle))
-	return <-errCh
-}
-
-type startGraphicApplicationOptions struct {
-	title            string
-	enableController bool
-}
-
-// StartGraphicApplicationOption is an option for display graphics start.
-type StartGraphicApplicationOption func(*startGraphicApplicationOptions) error
-
-// WithWindowTitle is an option to set window title of display graphics window.
-func WithWindowTitle(title string) StartGraphicApplicationOption {
-	return func(sgao *startGraphicApplicationOptions) error {
-		sgao.title = title
-		return nil
-	}
-}
-
-// WithController is an option to set virtual machine controller on graphics window toolbar.
-func WithController(enable bool) StartGraphicApplicationOption {
-	return func(sgao *startGraphicApplicationOptions) error {
-		sgao.enableController = enable
-		return nil
-	}
-}
-
-// StartGraphicApplication starts an application to display graphics of the VM.
-//
-// You must to call runtime.LockOSThread before calling this method.
-//
-// This is only supported on macOS 12 and newer, error will be returned on older versions.
-func (v *VirtualMachine) StartGraphicApplication(width, height float64, opts ...StartGraphicApplicationOption) error {
-	if err := macOSAvailable(12); err != nil {
-		return err
-	}
-	defaultOpts := &startGraphicApplicationOptions{}
-	for _, opt := range opts {
-		if err := opt(defaultOpts); err != nil {
-			return err
-		}
-	}
-	windowTitle := charWithGoString(defaultOpts.title)
-	defer windowTitle.Free()
-	C.startVirtualMachineWindow(
-		objc.Ptr(v),
-		v.dispatchQueue,
-		C.double(width),
-		C.double(height),
-		windowTitle.CString(),
-		C.bool(defaultOpts.enableController),
-	)
-	return nil
+	return v.lifecycle("stopWithCompletionHandler:")
 }
 
 // DisconnectedError represents an error that occurs when a VM’s network attachment is disconnected
@@ -491,26 +560,4 @@ func (v *VirtualMachine) watchDisconnected() {
 		}
 	}
 	v.disconnectedOut.Close()
-}
-
-//export emitAttachmentWasDisconnected
-func emitAttachmentWasDisconnected(index C.int, errPtr unsafe.Pointer, cgoHandleUintptr C.uintptr_t) {
-	handler := cgo.Handle(cgoHandleUintptr)
-	err := newNSError(errPtr)
-	// I expected it will not cause panic.
-	// if caused panic, that's unexpected behavior.
-	ch, _ := handler.Value().(*infinity.Channel[*disconnected])
-	ch.In() <- &disconnected{
-		err:   err,
-		index: int(index),
-	}
-}
-
-//export closeAttachmentWasDisconnectedChannel
-func closeAttachmentWasDisconnectedChannel(cgoHandleUintptr C.uintptr_t) {
-	handler := cgo.Handle(cgoHandleUintptr)
-	// I expected it will not cause panic.
-	// if caused panic, that's unexpected behavior.
-	ch, _ := handler.Value().(*infinity.Channel[*disconnected])
-	ch.Close()
 }

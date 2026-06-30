@@ -19,19 +19,7 @@ bool vmCanStop(void *machine, void *queue)
     RAISE_UNSUPPORTED_MACOS_EXCEPTION();
 }
 
-void stopWithCompletionHandler(void *machine, void *queue, uintptr_t cgoHandle)
-{
-    if (@available(macOS 12, *)) {
-        vm_completion_handler_t handler = makeVMCompletionHandler(cgoHandle);
-        dispatch_sync((dispatch_queue_t)queue, ^{
-            [(VZVirtualMachine *)machine stopWithCompletionHandler:handler];
-        });
-        Block_release(handler);
-        return;
-    }
-
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* stopWithCompletionHandler converted to Go in virtualization.go */
 
 /*!
  @abstract The platform configuration for a generic Intel or ARM virtual machine.

@@ -32,22 +32,7 @@
     The error parameter passed to the block is nil if the restore was successful.
  @see -[VZVirtualMachineConfiguration validateSaveRestoreSupportWithError:]
  */
-void restoreMachineStateFromURLWithCompletionHandler(void *machine, void *queue, uintptr_t cgoHandle, const char *saveFilePath)
-{
-#ifdef INCLUDE_TARGET_OSX_14
-    if (@available(macOS 14, *)) {
-        NSString *saveFilePathNSString = [NSString stringWithUTF8String:saveFilePath];
-        NSURL *saveFileURL = [NSURL fileURLWithPath:saveFilePathNSString];
-        vm_completion_handler_t handler = makeVMCompletionHandler(cgoHandle);
-        dispatch_sync((dispatch_queue_t)queue, ^{
-            [(VZVirtualMachine *)machine restoreMachineStateFromURL:saveFileURL completionHandler:handler];
-        });
-        Block_release(handler);
-        return;
-    }
-#endif
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* restoreMachineStateFromURLWithCompletionHandler converted to Go in virtualization_arm64.go */
 
 /*!
  @abstract Save a virtual machine.
@@ -67,22 +52,7 @@ void restoreMachineStateFromURLWithCompletionHandler(void *machine, void *queue,
     The error parameter passed to the block is nil if the save was successful.
  @see -[VZVirtualMachineConfiguration validateSaveRestoreSupportWithError:]
  */
-void saveMachineStateToURLWithCompletionHandler(void *machine, void *queue, uintptr_t cgoHandle, const char *saveFilePath)
-{
-#ifdef INCLUDE_TARGET_OSX_14
-    if (@available(macOS 14, *)) {
-        NSString *saveFilePathNSString = [NSString stringWithUTF8String:saveFilePath];
-        NSURL *saveFileURL = [NSURL fileURLWithPath:saveFilePathNSString];
-        vm_completion_handler_t handler = makeVMCompletionHandler(cgoHandle);
-        dispatch_sync((dispatch_queue_t)queue, ^{
-            [(VZVirtualMachine *)machine saveMachineStateToURL:saveFileURL completionHandler:handler];
-        });
-        Block_release(handler);
-        return;
-    }
-#endif
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* saveMachineStateToURLWithCompletionHandler converted to Go in virtualization_arm64.go */
 
 void *newVZLinuxRosettaAbstractSocketCachingOptionsWithName(const char *name, void **error)
 {

@@ -6,140 +6,8 @@
 
 #import "virtualization_11.h"
 
-@implementation Observer
-- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context;
-{
-
-    if ([keyPath isEqualToString:@"state"]) {
-        int newState = (int)[change[NSKeyValueChangeNewKey] integerValue];
-        changeStateOnObserver(newState, (uintptr_t)context);
-    }
-}
-@end
-
-@implementation VZVirtualMachineDelegateWrapper
-- (instancetype)init
-{
-    self = [super init];
-    if (self) {
-        _delegates = [NSHashTable weakObjectsHashTable];
-    }
-    return self;
-}
-
-- (void)addDelegate:(id<VZVirtualMachineDelegate>)delegate
-{
-    [self.delegates addObject:delegate];
-}
-
-- (void)guestDidStopVirtualMachine:(VZVirtualMachine *)virtualMachine
-{
-    for (id<VZVirtualMachineDelegate> delegate in self.delegates) {
-        if ([delegate respondsToSelector:@selector(guestDidStopVirtualMachine:)]) {
-            [delegate guestDidStopVirtualMachine:virtualMachine];
-        }
-    }
-}
-
-- (void)virtualMachine:(VZVirtualMachine *)virtualMachine didStopWithError:(NSError *)error
-{
-    for (id<VZVirtualMachineDelegate> delegate in self.delegates) {
-        if ([delegate respondsToSelector:@selector(virtualMachine:didStopWithError:)]) {
-            [delegate virtualMachine:virtualMachine didStopWithError:error];
-        }
-    }
-}
-
-- (void)virtualMachine:(VZVirtualMachine *)virtualMachine networkDevice:(VZNetworkDevice *)networkDevice
-    attachmentWasDisconnectedWithError:(NSError *)error
-{
-    for (id<VZVirtualMachineDelegate> delegate in self.delegates) {
-        if ([delegate respondsToSelector:@selector(virtualMachine:networkDevice:attachmentWasDisconnectedWithError:)]) {
-            [delegate virtualMachine:virtualMachine networkDevice:networkDevice attachmentWasDisconnectedWithError:error];
-        }
-    }
-}
-@end
-
-@implementation NetworkDeviceDisconnectedHandler {
-    uintptr_t _cgoHandle;
-}
-
-- (instancetype)initWithHandle:(uintptr_t)cgoHandle
-{
-    self = [super init];
-    if (self) {
-        _cgoHandle = cgoHandle;
-    }
-    return self;
-}
-
-- (void)virtualMachine:(VZVirtualMachine *)virtualMachine
-                         networkDevice:(VZNetworkDevice *)networkDevice
-    attachmentWasDisconnectedWithError:(NSError *)error
-{
-    int index = [self networkDevices:virtualMachine.networkDevices indexOf:networkDevice];
-    emitAttachmentWasDisconnected(index, error, _cgoHandle);
-}
-
-- (int)networkDevices:(NSArray<VZNetworkDevice *> *)networkDevices
-              indexOf:(VZNetworkDevice *)networkDevice
-{
-    NSInteger index = [networkDevices indexOfObject:networkDevice];
-    if (index != NSNotFound) {
-        return (int)index;
-    }
-    return -1;
-}
-
-- (void)dealloc
-{
-    closeAttachmentWasDisconnectedChannel(_cgoHandle);
-    [super dealloc];
-}
-@end
-
-@implementation ObservableVZVirtualMachine {
-    Observer *_observer;
-    VZVirtualMachineDelegateWrapper *_delegateWrapper;
-};
-- (instancetype)initWithConfiguration:(VZVirtualMachineConfiguration *)configuration
-                                queue:(dispatch_queue_t)queue
-                   statusUpdateHandle:(uintptr_t)statusUpdateHandle
-{
-    self = [super initWithConfiguration:configuration queue:queue];
-    if (self) {
-        _observer = [[Observer alloc] init];
-        [self addObserver:_observer
-               forKeyPath:@"state"
-                  options:NSKeyValueObservingOptionNew
-                  context:(void *)statusUpdateHandle];
-        _delegateWrapper = [[VZVirtualMachineDelegateWrapper alloc] init];
-        [super setDelegate:_delegateWrapper];
-    }
-    return self;
-}
-
-- (void)setDelegate:(id<VZVirtualMachineDelegate>)delegate
-{
-    if (delegate != _delegateWrapper) {
-        [_delegateWrapper addDelegate:delegate];
-    }
-}
-
-- (id<VZVirtualMachineDelegate>)delegate
-{
-    return _delegateWrapper;
-}
-
-- (void)dealloc
-{
-    [self removeObserver:_observer forKeyPath:@"state"];
-    [_observer release];
-    [_delegateWrapper release];
-    [super dealloc];
-}
-@end
+/* Observer, VZVirtualMachineDelegateWrapper, NetworkDeviceDisconnectedHandler,
+   and ObservableVZVirtualMachine converted to Go in virtualization.go */
 
 /* VZVirtioSocketListenerDelegateImpl converted to Go in socket.go */
 
@@ -804,20 +672,7 @@ VZVirtioSocketConnectionFlat convertVZVirtioSocketConnection2Flat(void *connecti
     Every operation on the virtual machine must be done on that queue. The callbacks and delegate methods are invoked on that queue.
     If the queue is not serial, the behavior is undefined.
  */
-void *newVZVirtualMachineWithDispatchQueue(void *config, void *queue, uintptr_t statusUpdateCgoHandle, uintptr_t disconnectedCgoHandle)
-{
-    if (@available(macOS 11, *)) {
-        ObservableVZVirtualMachine *vm = [[ObservableVZVirtualMachine alloc]
-            initWithConfiguration:(VZVirtualMachineConfiguration *)config
-                            queue:(dispatch_queue_t)queue
-               statusUpdateHandle:statusUpdateCgoHandle];
-        NetworkDeviceDisconnectedHandler *delegate = [[NetworkDeviceDisconnectedHandler alloc] initWithHandle:disconnectedCgoHandle];
-        [vm setDelegate:[delegate autorelease]];
-        return vm;
-    }
-
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* newVZVirtualMachineWithDispatchQueue converted to Go in virtualization.go */
 
 /*!
  @abstract Return the list of socket devices configured on this virtual machine. Return an empty array if no socket device is configured.
@@ -921,47 +776,8 @@ void *makeDispatchQueue(const char *label)
     return queue;
 }
 
-void startWithCompletionHandler(void *machine, void *queue, uintptr_t cgoHandle)
-{
-    if (@available(macOS 11, *)) {
-        vm_completion_handler_t handler = makeVMCompletionHandler(cgoHandle);
-        dispatch_sync((dispatch_queue_t)queue, ^{
-            [(VZVirtualMachine *)machine startWithCompletionHandler:handler];
-        });
-        Block_release(handler);
-        return;
-    }
-
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
-
-void pauseWithCompletionHandler(void *machine, void *queue, uintptr_t cgoHandle)
-{
-    if (@available(macOS 11, *)) {
-        vm_completion_handler_t handler = makeVMCompletionHandler(cgoHandle);
-        dispatch_sync((dispatch_queue_t)queue, ^{
-            [(VZVirtualMachine *)machine pauseWithCompletionHandler:handler];
-        });
-        Block_release(handler);
-        return;
-    }
-
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
-
-void resumeWithCompletionHandler(void *machine, void *queue, uintptr_t cgoHandle)
-{
-    if (@available(macOS 11, *)) {
-        vm_completion_handler_t handler = makeVMCompletionHandler(cgoHandle);
-        dispatch_sync((dispatch_queue_t)queue, ^{
-            [(VZVirtualMachine *)machine resumeWithCompletionHandler:handler];
-        });
-        Block_release(handler);
-        return;
-    }
-
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* startWithCompletionHandler, pauseWithCompletionHandler, and
+   resumeWithCompletionHandler converted to Go in virtualization.go */
 
 // TODO(codehex): use KVO
 bool vmCanStart(void *machine, void *queue)

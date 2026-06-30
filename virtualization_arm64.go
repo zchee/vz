@@ -3,22 +3,12 @@
 
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_11.h"
-# include "virtualization_12_arm64.h"
-# include "virtualization_13_arm64.h"
-# include "virtualization_14_arm64.h"
-*/
-import "C"
 import (
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"runtime/cgo"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -26,6 +16,10 @@ import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 	"github.com/Code-Hex/vz/v3/internal/progress"
 )
+
+// vzMacAuxiliaryStorageInitializationOptionAllowOverwrite mirrors
+// VZMacAuxiliaryStorageInitializationOptionAllowOverwrite.
+const vzMacAuxiliaryStorageInitializationOptionAllowOverwrite = 1 << 0
 
 // WithStartUpFromMacOSRecovery is an option to specifiy whether to start up
 // from macOS Recovery for macOS VM.
@@ -37,9 +31,9 @@ func WithStartUpFromMacOSRecovery(startInRecovery bool) VirtualMachineStartOptio
 		if err := macOSAvailable(13); err != nil {
 			return err
 		}
-		vmso.macOSVirtualMachineStartOptionsPtr = C.newVZMacOSVirtualMachineStartOptions(
-			C.bool(startInRecovery),
-		)
+		opts := objc.New("VZMacOSVirtualMachineStartOptions", "init")
+		objc.SendVoid(opts, "setStartUpFromMacOSRecovery:", startInRecovery)
+		vmso.macOSVirtualMachineStartOptionsPtr = opts
 		return nil
 	}
 }
@@ -73,11 +67,12 @@ func NewMacHardwareModelWithData(b []byte) (*MacHardwareModel, error) {
 		return nil, err
 	}
 
-	ptr := C.newVZMacHardwareModelWithBytes(
-		unsafe.Pointer(&b[0]),
-		C.int(len(b)),
+	data := objc.NSData(b)
+	defer objc.SendVoid(data, "release")
+
+	ret := newMacHardwareModel(
+		objc.New("VZMacHardwareModel", "initWithDataRepresentation:", data),
 	)
-	ret := newMacHardwareModel(ptr)
 	objc.SetFinalizer(ret, func(self *MacHardwareModel) {
 		objc.Release(self)
 	})
@@ -85,14 +80,10 @@ func NewMacHardwareModelWithData(b []byte) (*MacHardwareModel, error) {
 }
 
 func newMacHardwareModel(ptr unsafe.Pointer) *MacHardwareModel {
-	ret := C.convertVZMacHardwareModel2Struct(ptr)
-	dataRepresentation := ret.dataRepresentation
-	bytePointer := (*byte)(unsafe.Pointer(dataRepresentation.ptr))
 	return &MacHardwareModel{
-		pointer:   objc.NewPointer(ptr),
-		supported: bool(ret.supported),
-		// https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
-		dataRepresentation: unsafe.Slice(bytePointer, dataRepresentation.len),
+		pointer:            objc.NewPointer(ptr),
+		supported:          objc.Send[bool](objc.ID(uintptr(ptr)), objc.RegisterName("isSupported")),
+		dataRepresentation: objc.NSDataToBytes(objc.SendPtr(ptr, "dataRepresentation")),
 	}
 }
 
@@ -131,11 +122,12 @@ func NewMacMachineIdentifierWithData(b []byte) (*MacMachineIdentifier, error) {
 		return nil, err
 	}
 
-	ptr := C.newVZMacMachineIdentifierWithBytes(
-		unsafe.Pointer(&b[0]),
-		C.int(len(b)),
-	)
-	return newMacMachineIdentifier(ptr), nil
+	data := objc.NSData(b)
+	defer objc.SendVoid(data, "release")
+
+	return newMacMachineIdentifier(
+		objc.New("VZMacMachineIdentifier", "initWithDataRepresentation:", data),
+	), nil
 }
 
 // NewMacMachineIdentifier initialize a new Mac machine identifier is used by macOS guests to uniquely
@@ -153,16 +145,15 @@ func NewMacMachineIdentifier() (*MacMachineIdentifier, error) {
 	if err := macOSAvailable(12); err != nil {
 		return nil, err
 	}
-	return newMacMachineIdentifier(C.newVZMacMachineIdentifier()), nil
+	return newMacMachineIdentifier(
+		objc.New("VZMacMachineIdentifier", "init"),
+	), nil
 }
 
 func newMacMachineIdentifier(ptr unsafe.Pointer) *MacMachineIdentifier {
-	dataRepresentation := C.getVZMacMachineIdentifierDataRepresentation(ptr)
-	bytePointer := (*byte)(unsafe.Pointer(dataRepresentation.ptr))
 	return &MacMachineIdentifier{
-		pointer: objc.NewPointer(ptr),
-		// https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
-		dataRepresentation: unsafe.Slice(bytePointer, dataRepresentation.len),
+		pointer:            objc.NewPointer(ptr),
+		dataRepresentation: objc.NSDataToBytes(objc.SendPtr(ptr, "dataRepresentation")),
 	}
 }
 
@@ -185,18 +176,19 @@ type NewMacAuxiliaryStorageOption func(*MacAuxiliaryStorage) error
 // to you specified storage path.
 func WithCreatingMacAuxiliaryStorage(hardwareModel *MacHardwareModel) NewMacAuxiliaryStorageOption {
 	return func(mas *MacAuxiliaryStorage) error {
-		cpath := charWithGoString(mas.storagePath)
-		defer cpath.Free()
+		errSlot := objc.NewErrorSlot()
+		defer objc.Free(errSlot)
 
-		nserrPtr := newNSErrorAsNil()
 		mas.pointer = objc.NewPointer(
-			C.newVZMacAuxiliaryStorageWithCreating(
-				cpath.CString(),
+			objc.New(
+				"VZMacAuxiliaryStorage", "initCreatingStorageAtURL:hardwareModel:options:error:",
+				objc.FileURL(mas.storagePath),
 				objc.Ptr(hardwareModel),
-				&nserrPtr,
+				uint(vzMacAuxiliaryStorageInitializationOptionAllowOverwrite),
+				errSlot,
 			),
 		)
-		if err := newNSError(nserrPtr); err != nil {
+		if err := newNSError(objc.ErrorFromSlot(errSlot)); err != nil {
 			return err
 		}
 		return nil
@@ -221,10 +213,8 @@ func NewMacAuxiliaryStorage(storagePath string, opts ...NewMacAuxiliaryStorageOp
 	}
 
 	if objc.Ptr(storage) == nil {
-		cpath := charWithGoString(storagePath)
-		defer cpath.Free()
 		storage.pointer = objc.NewPointer(
-			C.newVZMacAuxiliaryStorage(cpath.CString()),
+			objc.New("VZMacAuxiliaryStorage", "initWithContentsOfURL:", objc.FileURL(storagePath)),
 		)
 	}
 	return storage, nil
@@ -278,6 +268,46 @@ func (m *MacOSRestoreImage) MostFeaturefulSupportedConfiguration() *MacOSConfigu
 	return newMacOSConfigurationRequirements(m.mostFeaturefulSupportedConfigurationPtr)
 }
 
+// nsOperatingSystemVersion mirrors Foundation's NSOperatingSystemVersion struct
+// (three NSInteger fields), used for the struct-returning
+// -[VZMacOSRestoreImage operatingSystemVersion] message.
+type nsOperatingSystemVersion struct {
+	Major int64
+	Minor int64
+	Patch int64
+}
+
+// newMacOSRestoreImageFromPtr builds a *MacOSRestoreImage by reading the
+// properties of a VZMacOSRestoreImage object. The mostFeaturefulSupportedConfiguration
+// pointer is retained because it is kept beyond the lifetime of the framework's
+// completion callback.
+func newMacOSRestoreImageFromPtr(restoreImagePtr unsafe.Pointer) *MacOSRestoreImage {
+	if restoreImagePtr == nil {
+		return nil
+	}
+	id := objc.ID(uintptr(restoreImagePtr))
+	urlObj := objc.SendPtr(restoreImagePtr, "URL")
+	absStr := objc.SendPtr(urlObj, "absoluteString")
+	buildVerObj := objc.SendPtr(restoreImagePtr, "buildVersion")
+	osv := objc.Send[nsOperatingSystemVersion](id, objc.RegisterName("operatingSystemVersion"))
+
+	config := objc.SendPtr(restoreImagePtr, "mostFeaturefulSupportedConfiguration")
+	if config != nil {
+		objc.SendVoid(config, "retain")
+	}
+
+	return &MacOSRestoreImage{
+		url:          objc.GoString(objc.SendPtr(absStr, "UTF8String")),
+		buildVersion: objc.GoString(objc.SendPtr(buildVerObj, "UTF8String")),
+		operatingSystemVersion: OperatingSystemVersion{
+			MajorVersion: osv.Major,
+			MinorVersion: osv.Minor,
+			PatchVersion: osv.Patch,
+		},
+		mostFeaturefulSupportedConfigurationPtr: config,
+	}
+}
+
 // MacOSConfigurationRequirements describes the parameter constraints required by a specific configuration of macOS.
 //
 // When a VZMacOSRestoreImage is loaded, it can be inspected to determine the configurations supported by that restore image.
@@ -288,11 +318,16 @@ type MacOSConfigurationRequirements struct {
 }
 
 func newMacOSConfigurationRequirements(ptr unsafe.Pointer) *MacOSConfigurationRequirements {
-	ret := C.convertVZMacOSConfigurationRequirements2Struct(ptr)
+	id := objc.ID(uintptr(ptr))
+	// hardwareModel is retained because it is kept beyond this conversion.
+	hardwareModel := objc.SendPtr(ptr, "hardwareModel")
+	if hardwareModel != nil {
+		objc.SendVoid(hardwareModel, "retain")
+	}
 	return &MacOSConfigurationRequirements{
-		minimumSupportedCPUCount:   uint64(ret.minimumSupportedCPUCount),
-		minimumSupportedMemorySize: uint64(ret.minimumSupportedMemorySize),
-		hardwareModelPtr:           ret.hardwareModel,
+		minimumSupportedCPUCount:   objc.Send[uint64](id, objc.RegisterName("minimumSupportedCPUCount")),
+		minimumSupportedMemorySize: objc.Send[uint64](id, objc.RegisterName("minimumSupportedMemorySize")),
+		hardwareModelPtr:           hardwareModel,
 	}
 }
 
@@ -315,39 +350,10 @@ func (m *MacOSConfigurationRequirements) MinimumSupportedMemorySize() uint64 {
 	return m.minimumSupportedMemorySize
 }
 
-type macOSRestoreImageHandler func(restoreImage *MacOSRestoreImage, err error)
-
-//export macOSRestoreImageCompletionHandler
-func macOSRestoreImageCompletionHandler(cgoHandleUintptr C.uintptr_t, restoreImagePtr, errPtr unsafe.Pointer) {
-	cgoHandle := cgo.Handle(cgoHandleUintptr)
-
-	handler := cgoHandle.Value().(macOSRestoreImageHandler)
-	defer cgoHandle.Delete()
-
-	restoreImageStruct := (*C.VZMacOSRestoreImageStruct)(restoreImagePtr)
-
-	restoreImage := &MacOSRestoreImage{
-		url:          (*char)(restoreImageStruct.url).String(),
-		buildVersion: (*char)(restoreImageStruct.buildVersion).String(),
-		operatingSystemVersion: OperatingSystemVersion{
-			MajorVersion: int64(restoreImageStruct.operatingSystemVersion.majorVersion),
-			MinorVersion: int64(restoreImageStruct.operatingSystemVersion.minorVersion),
-			PatchVersion: int64(restoreImageStruct.operatingSystemVersion.patchVersion),
-		},
-		mostFeaturefulSupportedConfigurationPtr: restoreImageStruct.mostFeaturefulSupportedConfiguration,
-	}
-
-	if err := newNSError(errPtr); err != nil {
-		handler(restoreImage, err)
-	} else {
-		handler(restoreImage, nil)
-	}
-}
-
 // downloadRestoreImage resumable downloads macOS restore image (ipsw) file.
-func downloadRestoreImage(ctx context.Context, url string, destPath string) (*progress.Reader, error) {
+func downloadRestoreImage(ctx context.Context, url, destPath string) (*progress.Reader, error) {
 	// open or create
-	f, err := os.OpenFile(destPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	f, err := os.OpenFile(destPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666)
 	if err != nil {
 		return nil, err
 	}
@@ -399,25 +405,28 @@ func GetLatestSupportedMacOSRestoreImageURL() (string, error) {
 	if err := macOSAvailable(12); err != nil {
 		return "", err
 	}
-	waitCh := make(chan struct{})
-	var (
-		url      string
-		fetchErr error
-	)
-	handler := macOSRestoreImageHandler(func(restoreImage *MacOSRestoreImage, err error) {
-		url = restoreImage.URL()
-		fetchErr = err
-		defer close(waitCh)
-	})
-	cgoHandle := cgo.NewHandle(handler)
-	C.fetchLatestSupportedMacOSRestoreImageWithCompletionHandler(
-		C.uintptr_t(cgoHandle),
-	)
-	<-waitCh
-	if fetchErr != nil {
-		return "", fetchErr
+	type result struct {
+		url string
+		err error
 	}
-	return url, nil
+	ch := make(chan result, 1)
+	block := objc.BlockObjectError(func(imgPtr, errPtr unsafe.Pointer) {
+		if err := newNSError(errPtr); err != nil {
+			ch <- result{err: err}
+			return
+		}
+		ch <- result{url: newMacOSRestoreImageFromPtr(imgPtr).URL()}
+	})
+	objc.ID(objc.GetClass("VZMacOSRestoreImage")).Send(
+		objc.RegisterName("fetchLatestSupportedWithCompletionHandler:"),
+		block,
+	)
+	res := <-ch
+	block.Release()
+	if res.err != nil {
+		return "", res.err
+	}
+	return res.url, nil
 }
 
 // FetchLatestSupportedMacOSRestoreImage fetches the latest macOS restore image supported by this host from the network.
@@ -454,18 +463,61 @@ func LoadMacOSRestoreImageFromPath(imagePath string) (retImage *MacOSRestoreImag
 	}
 
 	waitCh := make(chan struct{})
-	handler := macOSRestoreImageHandler(func(restoreImage *MacOSRestoreImage, err error) {
-		retImage = restoreImage
-		retErr = err
+	block := objc.BlockObjectError(func(imgPtr, errPtr unsafe.Pointer) {
+		if err := newNSError(errPtr); err != nil {
+			retErr = err
+		} else {
+			retImage = newMacOSRestoreImageFromPtr(imgPtr)
+		}
 		close(waitCh)
 	})
-	cgoHandle := cgo.NewHandle(handler)
-
-	cs := charWithGoString(imagePath)
-	defer cs.Free()
-	C.loadMacOSRestoreImageFile(cs.CString(), C.uintptr_t(cgoHandle))
+	objc.ID(objc.GetClass("VZMacOSRestoreImage")).Send(
+		objc.RegisterName("loadFileURL:completionHandler:"),
+		objc.FileURL(imagePath),
+		block,
+	)
 	<-waitCh
-	return
+	block.Release()
+	return retImage, retErr
+}
+
+// installProgressObserver is the Go-defined Objective-C class that observes the
+// "fractionCompleted" key path of a VZMacOSInstaller's NSProgress. Its method
+// reports each fraction to the func(float64) associated with the observer
+// instance and removes itself once the progress finishes.
+var (
+	installProgressObserverClass objc.Class
+	installProgressObserverOnce  sync.Once
+)
+
+func installProgressObserver() objc.Class {
+	installProgressObserverOnce.Do(func() {
+		cls, err := objc.DefineClass(
+			"VZMacOSInstallerProgressObserverGo",
+			objc.NSObjectClass(),
+			[]objc.MethodDef{{
+				Cmd: objc.RegisterName("observeValueForKeyPath:ofObject:change:context:"),
+				Fn:  installProgressObserve,
+			}},
+		)
+		if err != nil {
+			panic("vz: failed to define install progress observer: " + err.Error())
+		}
+		installProgressObserverClass = cls
+	})
+	return installProgressObserverClass
+}
+
+func installProgressObserve(self objc.ID, _ objc.SEL, _, object, _, _ unsafe.Pointer) {
+	handler, ok := objc.Associated(uintptr(self)).(func(float64))
+	if !ok {
+		return
+	}
+	id := objc.ID(uintptr(object))
+	handler(objc.Send[float64](id, objc.RegisterName("fractionCompleted")))
+	if objc.Send[bool](id, objc.RegisterName("finished")) {
+		objc.SendVoid(object, "removeObserver:forKeyPath:", self, objc.NSString("fractionCompleted"))
+	}
 }
 
 // MacOSInstaller is a struct you use to install macOS on the specified virtual machine.
@@ -495,17 +547,20 @@ func NewMacOSInstaller(vm *VirtualMachine, restoreImageIpsw string) (*MacOSInsta
 		return nil, err
 	}
 
-	cs := charWithGoString(restoreImageIpsw)
-	defer cs.Free()
+	var installerPtr unsafe.Pointer
+	objc.DispatchSync(vm.dispatchQueue, func() {
+		installerPtr = objc.New(
+			"VZMacOSInstaller", "initWithVirtualMachine:restoreImageURL:",
+			objc.Ptr(vm),
+			objc.FileURL(restoreImageIpsw),
+		)
+	})
+
 	ret := &MacOSInstaller{
-		pointer: objc.NewPointer(
-			C.newVZMacOSInstaller(objc.Ptr(vm), vm.dispatchQueue, cs.CString()),
-		),
-		observerPointer: objc.NewPointer(
-			C.newProgressObserverVZMacOSInstaller(),
-		),
-		vm:     vm,
-		doneCh: make(chan struct{}),
+		pointer:         objc.NewPointer(installerPtr),
+		observerPointer: objc.NewPointer(objc.NewObject(installProgressObserver())),
+		vm:              vm,
+		doneCh:          make(chan struct{}),
 	}
 	ret.setFractionCompleted(0)
 	objc.SetFinalizer(ret, func(self *MacOSInstaller) {
@@ -513,28 +568,6 @@ func NewMacOSInstaller(vm *VirtualMachine, restoreImageIpsw string) (*MacOSInsta
 		objc.Release(self)
 	})
 	return ret, nil
-}
-
-//export macOSInstallCompletionHandler
-func macOSInstallCompletionHandler(cgoHandleUintptr C.uintptr_t, errPtr unsafe.Pointer) {
-	cgoHandle := cgo.Handle(cgoHandleUintptr)
-
-	handler := cgoHandle.Value().(func(error))
-	defer cgoHandle.Delete()
-
-	if err := newNSError(errPtr); err != nil {
-		handler(err)
-	} else {
-		handler(nil)
-	}
-}
-
-//export macOSInstallFractionCompletedHandler
-func macOSInstallFractionCompletedHandler(cgoHandleUintptr C.uintptr_t, completed C.double) {
-	cgoHandle := cgo.Handle(cgoHandleUintptr)
-
-	handler := cgoHandle.Value().(func(float64))
-	handler(float64(completed))
 }
 
 // Install starts installing macOS.
@@ -549,26 +582,46 @@ func (m *MacOSInstaller) Install(ctx context.Context) error {
 	}
 
 	m.once.Do(func() {
-		completionHandler := cgo.NewHandle(func(err error) {
-			m.err = err
+		completionBlock := objc.BlockError(func(errPtr unsafe.Pointer) {
+			if err := newNSError(errPtr); err != nil {
+				m.err = err
+			}
 			close(m.doneCh)
 		})
-		fractionCompletedHandler := cgo.NewHandle(func(v float64) {
+		observerPtr := objc.Ptr(m.observerPointer)
+		objc.Associate(uintptr(observerPtr), func(v float64) {
 			m.setFractionCompleted(v)
 		})
 
-		C.installByVZMacOSInstaller(
-			objc.Ptr(m),
-			m.vm.dispatchQueue,
-			objc.Ptr(m.observerPointer),
-			C.uintptr_t(completionHandler),
-			C.uintptr_t(fractionCompletedHandler),
-		)
+		// The completion block must outlive this call (installation is
+		// asynchronous). Once installation finishes (doneCh is closed) the
+		// framework no longer references it, so release the block and drop the
+		// observer's Go state to allow the installer to be collected.
+		go func() {
+			<-m.doneCh
+			completionBlock.Release()
+			objc.Disassociate(uintptr(observerPtr))
+		}()
+
+		objc.DispatchSync(m.vm.dispatchQueue, func() {
+			objc.SendVoid(objc.Ptr(m), "installWithCompletionHandler:", completionBlock)
+			progressPtr := objc.SendPtr(objc.Ptr(m), "progress")
+			objc.SendVoid(
+				progressPtr, "addObserver:forKeyPath:options:context:",
+				observerPtr,
+				objc.NSString("fractionCompleted"),
+				uint(nsKeyValueObservingOptionInitial|nsKeyValueObservingOptionNew),
+				unsafe.Pointer(nil),
+			)
+		})
 	})
 
 	select {
 	case <-ctx.Done():
-		C.cancelInstallVZMacOSInstaller(objc.Ptr(m))
+		progressPtr := objc.SendPtr(objc.Ptr(m), "progress")
+		if objc.Send[bool](objc.ID(uintptr(progressPtr)), objc.RegisterName("isCancellable")) {
+			objc.SendVoid(progressPtr, "cancel")
+		}
 		return ctx.Err()
 	case <-m.doneCh:
 	}
@@ -588,6 +641,20 @@ func (m *MacOSInstaller) FractionCompleted() float64 {
 
 // Done recieves a notification that indicates the install process is completed.
 func (m *MacOSInstaller) Done() <-chan struct{} { return m.doneCh }
+
+// saveRestore issues a save/restore selector (which takes a file URL and a
+// completionHandler:) on the VM's queue and waits for the completion handler.
+func (v *VirtualMachine) saveRestore(sel, saveFilePath string) error {
+	errCh := make(chan error, 1)
+	block := completionBlockError(errCh)
+	fileURL := objc.FileURL(saveFilePath)
+	objc.DispatchSync(v.dispatchQueue, func() {
+		objc.SendVoid(objc.Ptr(v), sel, fileURL, block)
+	})
+	err := <-errCh
+	block.Release()
+	return err
+}
 
 // SaveMachineStateToPath saves the state of a VM.
 //
@@ -612,13 +679,7 @@ func (v *VirtualMachine) SaveMachineStateToPath(saveFilePath string) error {
 	if _, err := v.config.ValidateSaveRestoreSupport(); err != nil {
 		return err
 	}
-	cs := charWithGoString(saveFilePath)
-	defer cs.Free()
-	h, errCh := makeHandler()
-	handle := cgo.NewHandle(h)
-	defer handle.Delete()
-	C.saveMachineStateToURLWithCompletionHandler(objc.Ptr(v), v.dispatchQueue, C.uintptr_t(handle), cs.CString())
-	return <-errCh
+	return v.saveRestore("saveMachineStateToURL:completionHandler:", saveFilePath)
 }
 
 // RestoreMachineStateFromURL restores a VM from a previously saved state.
@@ -646,11 +707,5 @@ func (v *VirtualMachine) RestoreMachineStateFromURL(saveFilePath string) error {
 	if _, err := v.config.ValidateSaveRestoreSupport(); err != nil {
 		return err
 	}
-	cs := charWithGoString(saveFilePath)
-	defer cs.Free()
-	h, errCh := makeHandler()
-	handle := cgo.NewHandle(h)
-	defer handle.Delete()
-	C.restoreMachineStateFromURLWithCompletionHandler(objc.Ptr(v), v.dispatchQueue, C.uintptr_t(handle), cs.CString())
-	return <-errCh
+	return v.saveRestore("restoreMachineStateFromURL:completionHandler:", saveFilePath)
 }

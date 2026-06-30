@@ -425,20 +425,7 @@ const char *getSpiceAgentPortName()
     The error parameter passed to the block is nil if the start was successful.
  @seealso VZMacOSVirtualMachineStartOptions
  */
-void startWithOptionsCompletionHandler(void *machine, void *queue, void *options, uintptr_t cgoHandle)
-{
-#ifdef INCLUDE_TARGET_OSX_13
-    if (@available(macOS 13, *)) {
-        vm_completion_handler_t handler = makeVMCompletionHandler(cgoHandle);
-        dispatch_sync((dispatch_queue_t)queue, ^{
-            [(VZVirtualMachine *)machine startWithOptions:options completionHandler:handler];
-        });
-        Block_release(handler);
-        return;
-    }
-#endif
-    RAISE_UNSUPPORTED_MACOS_EXCEPTION();
-}
+/* startWithOptionsCompletionHandler converted to Go in virtualization.go */
 
 /*!
  @abstract The macOS automount tag.
