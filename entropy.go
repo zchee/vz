@@ -1,11 +1,5 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_11.h"
-*/
-import "C"
 import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -30,7 +24,7 @@ func NewVirtioEntropyDeviceConfiguration() (*VirtioEntropyDeviceConfiguration, e
 
 	config := &VirtioEntropyDeviceConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZVirtioEntropyDeviceConfiguration(),
+			objc.New("VZVirtioEntropyDeviceConfiguration", "init"),
 		),
 	}
 	objc.SetFinalizer(config, func(self *VirtioEntropyDeviceConfiguration) {

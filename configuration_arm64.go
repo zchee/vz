@@ -3,12 +3,6 @@
 
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_14_arm64.h"
-*/
-import "C"
 import "github.com/Code-Hex/vz/v3/internal/objc"
 
 // ValidateSaveRestoreSupport Determines whether the framework can save or restore the VM’s current configuration.
@@ -19,11 +13,15 @@ import "github.com/Code-Hex/vz/v3/internal/objc"
 // If this evaluates to false, the caller should expect future calls to `(*VirtualMachine).SaveMachineStateToPath` to fail.
 // error If not nil, assigned with an error describing the unsupported configuration option.
 func (v *VirtualMachineConfiguration) ValidateSaveRestoreSupport() (bool, error) {
-	nserrPtr := newNSErrorAsNil()
-	ret := C.validateSaveRestoreSupportWithError(objc.Ptr(v), &nserrPtr)
-	err := newNSError(nserrPtr)
-	if err != nil {
-		return false, err
+	errSlot := objc.NewErrorSlot()
+	defer objc.Free(errSlot)
+	ret := objc.Send[bool](
+		objc.ID(uintptr(objc.Ptr(v))),
+		objc.RegisterName("validateSaveRestoreSupportWithError:"),
+		errSlot,
+	)
+	if objc.HasError(errSlot) {
+		return false, newNSError(objc.ErrorFromSlot(errSlot))
 	}
-	return (bool)(ret), nil
+	return ret, nil
 }

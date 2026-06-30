@@ -1,14 +1,5 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_11.h"
-# include "virtualization_12.h"
-# include "virtualization_13.h"
-# include "virtualization_15.h"
-*/
-import "C"
 import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -60,16 +51,14 @@ func NewVirtualMachineConfiguration(bootLoader BootLoader, cpu uint, memorySize 
 		return nil, err
 	}
 
+	configPtr := objc.New("VZVirtualMachineConfiguration", "init")
+	objc.SendVoid(configPtr, "setBootLoader:", objc.Ptr(bootLoader))
+	objc.SendVoid(configPtr, "setCPUCount:", cpu)
+	objc.SendVoid(configPtr, "setMemorySize:", memorySize)
 	config := &VirtualMachineConfiguration{
 		cpuCount:   cpu,
 		memorySize: memorySize,
-		pointer: objc.NewPointer(
-			C.newVZVirtualMachineConfiguration(
-				objc.Ptr(bootLoader),
-				C.uint(cpu),
-				C.ulonglong(memorySize),
-			),
-		),
+		pointer:    objc.NewPointer(configPtr),
 	}
 	objc.SetFinalizer(config, func(self *VirtualMachineConfiguration) {
 		objc.Release(self)
@@ -82,13 +71,17 @@ func NewVirtualMachineConfiguration(bootLoader BootLoader, cpu uint, memorySize 
 // Return true if the configuration is valid.
 // If error is not nil, assigned with the validation error if the validation failed.
 func (v *VirtualMachineConfiguration) Validate() (bool, error) {
-	nserrPtr := newNSErrorAsNil()
-	ret := C.validateVZVirtualMachineConfiguration(objc.Ptr(v), &nserrPtr)
-	err := newNSError(nserrPtr)
-	if err != nil {
-		return false, err
+	errSlot := objc.NewErrorSlot()
+	defer objc.Free(errSlot)
+	ret := objc.Send[bool](
+		objc.ID(uintptr(objc.Ptr(v))),
+		objc.RegisterName("validateWithError:"),
+		errSlot,
+	)
+	if objc.HasError(errSlot) {
+		return false, newNSError(objc.ErrorFromSlot(errSlot))
 	}
-	return (bool)(ret), nil
+	return ret, nil
 }
 
 // SetEntropyDevicesVirtualMachineConfiguration sets list of entropy devices. Empty by default.
@@ -98,7 +91,7 @@ func (v *VirtualMachineConfiguration) SetEntropyDevicesVirtualMachineConfigurati
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setEntropyDevicesVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setEntropyDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // SetMemoryBalloonDevicesVirtualMachineConfiguration sets list of memory balloon devices. Empty by default.
@@ -108,7 +101,7 @@ func (v *VirtualMachineConfiguration) SetMemoryBalloonDevicesVirtualMachineConfi
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setMemoryBalloonDevicesVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setMemoryBalloonDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // SetNetworkDevicesVirtualMachineConfiguration sets list of network adapters. Empty by default.
@@ -118,7 +111,7 @@ func (v *VirtualMachineConfiguration) SetNetworkDevicesVirtualMachineConfigurati
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setNetworkDevicesVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setNetworkDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
 	v.networkDeviceConfiguration = cs
 }
 
@@ -135,7 +128,7 @@ func (v *VirtualMachineConfiguration) SetSerialPortsVirtualMachineConfiguration(
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setSerialPortsVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setSerialPorts:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // SetSocketDevicesVirtualMachineConfiguration sets list of socket devices. Empty by default.
@@ -145,14 +138,14 @@ func (v *VirtualMachineConfiguration) SetSocketDevicesVirtualMachineConfiguratio
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setSocketDevicesVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setSocketDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // SocketDevices return the list of socket device configuration configured in this virtual machine configuration.
 // Return an empty array if no socket device configuration is set.
 func (v *VirtualMachineConfiguration) SocketDevices() []SocketDeviceConfiguration {
 	nsArray := objc.NewNSArray(
-		C.socketDevicesVZVirtualMachineConfiguration(objc.Ptr(v)),
+		objc.SendPtr(objc.Ptr(v), "socketDevices"),
 	)
 	ptrs := nsArray.ToPointerSlice()
 	socketDevices := make([]SocketDeviceConfiguration, len(ptrs))
@@ -169,7 +162,7 @@ func (v *VirtualMachineConfiguration) SetStorageDevicesVirtualMachineConfigurati
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setStorageDevicesVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setStorageDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
 	v.storageDeviceConfiguration = cs
 }
 
@@ -191,7 +184,7 @@ func (v *VirtualMachineConfiguration) SetDirectorySharingDevicesVirtualMachineCo
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setDirectorySharingDevicesVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setDirectorySharingDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // SetPlatformVirtualMachineConfiguration sets the hardware platform to use. Defaults to GenericPlatformConfiguration.
@@ -201,7 +194,7 @@ func (v *VirtualMachineConfiguration) SetPlatformVirtualMachineConfiguration(c P
 	if err := macOSAvailable(12); err != nil {
 		return
 	}
-	C.setPlatformVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(c))
+	objc.SendVoid(objc.Ptr(v), "setPlatform:", objc.Ptr(c))
 }
 
 // SetGraphicsDevicesVirtualMachineConfiguration sets list of graphics devices. Empty by default.
@@ -216,7 +209,7 @@ func (v *VirtualMachineConfiguration) SetGraphicsDevicesVirtualMachineConfigurat
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setGraphicsDevicesVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setGraphicsDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // SetPointingDevicesVirtualMachineConfiguration sets list of pointing devices. Empty by default.
@@ -231,7 +224,7 @@ func (v *VirtualMachineConfiguration) SetPointingDevicesVirtualMachineConfigurat
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setPointingDevicesVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setPointingDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // SetKeyboardsVirtualMachineConfiguration sets list of keyboards. Empty by default.
@@ -246,7 +239,7 @@ func (v *VirtualMachineConfiguration) SetKeyboardsVirtualMachineConfiguration(cs
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setKeyboardsVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setKeyboards:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // SetAudioDevicesVirtualMachineConfiguration sets list of audio devices. Empty by default.
@@ -261,7 +254,7 @@ func (v *VirtualMachineConfiguration) SetAudioDevicesVirtualMachineConfiguration
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setAudioDevicesVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setAudioDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // SetConsoleDevicesVirtualMachineConfiguration sets list of console devices. Empty by default.
@@ -276,7 +269,7 @@ func (v *VirtualMachineConfiguration) SetConsoleDevicesVirtualMachineConfigurati
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setConsoleDevicesVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setConsoleDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // SetUSBControllerConfiguration sets list of USB controllers. Empty by default.
@@ -291,7 +284,7 @@ func (v *VirtualMachineConfiguration) SetUSBControllersVirtualMachineConfigurati
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setUSBControllersVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setUsbControllers:", objc.SendPtr(objc.Ptr(array), "copy"))
 	v.usbControllerConfiguration = us
 }
 
@@ -304,23 +297,35 @@ func (v *VirtualMachineConfiguration) USBControllers() []USBControllerConfigurat
 // VirtualMachineConfigurationMinimumAllowedMemorySize returns minimum
 // amount of memory required by virtual machines.
 func VirtualMachineConfigurationMinimumAllowedMemorySize() uint64 {
-	return uint64(C.minimumAllowedMemorySizeVZVirtualMachineConfiguration())
+	return objc.Send[uint64](
+		objc.ID(objc.GetClass("VZVirtualMachineConfiguration")),
+		objc.RegisterName("minimumAllowedMemorySize"),
+	)
 }
 
 // VirtualMachineConfigurationMaximumAllowedMemorySize returns maximum
 // amount of memory allowed for a virtual machine.
 func VirtualMachineConfigurationMaximumAllowedMemorySize() uint64 {
-	return uint64(C.maximumAllowedMemorySizeVZVirtualMachineConfiguration())
+	return objc.Send[uint64](
+		objc.ID(objc.GetClass("VZVirtualMachineConfiguration")),
+		objc.RegisterName("maximumAllowedMemorySize"),
+	)
 }
 
 // VirtualMachineConfigurationMinimumAllowedCPUCount returns minimum
 // number of CPUs for a virtual machine.
 func VirtualMachineConfigurationMinimumAllowedCPUCount() uint {
-	return uint(C.minimumAllowedCPUCountVZVirtualMachineConfiguration())
+	return uint(objc.Send[uint64](
+		objc.ID(objc.GetClass("VZVirtualMachineConfiguration")),
+		objc.RegisterName("minimumAllowedCPUCount"),
+	))
 }
 
 // VirtualMachineConfigurationMaximumAllowedCPUCount returns maximum
 // number of CPUs for a virtual machine.
 func VirtualMachineConfigurationMaximumAllowedCPUCount() uint {
-	return uint(C.maximumAllowedCPUCountVZVirtualMachineConfiguration())
+	return uint(objc.Send[uint64](
+		objc.ID(objc.GetClass("VZVirtualMachineConfiguration")),
+		objc.RegisterName("maximumAllowedCPUCount"),
+	))
 }

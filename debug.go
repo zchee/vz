@@ -3,12 +3,6 @@
 
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_debug.h"
-*/
-import "C"
 import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -46,7 +40,7 @@ func NewGDBDebugStubConfiguration(port uint32) (*GDBDebugStubConfiguration, erro
 
 	config := &GDBDebugStubConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZGDBDebugStubConfiguration(C.uint32_t(port)),
+			objc.New("_VZGDBDebugStubConfiguration", "initWithPort:", int(port)),
 		),
 	}
 	objc.SetFinalizer(config, func(self *GDBDebugStubConfiguration) {
@@ -59,5 +53,5 @@ func NewGDBDebugStubConfiguration(port uint32) (*GDBDebugStubConfiguration, erro
 //
 // This API is not officially published and is subject to change without notice.
 func (v *VirtualMachineConfiguration) SetDebugStubVirtualMachineConfiguration(dc DebugStubConfiguration) {
-	C.setDebugStubVZVirtualMachineConfiguration(objc.Ptr(v), objc.Ptr(dc))
+	objc.SendVoid(objc.Ptr(v), "_setDebugStub:", objc.Ptr(dc))
 }

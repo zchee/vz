@@ -3,12 +3,6 @@
 
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_12_arm64.h"
-*/
-import "C"
 import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -33,7 +27,7 @@ func NewMacOSBootLoader() (*MacOSBootLoader, error) {
 
 	bootLoader := &MacOSBootLoader{
 		pointer: objc.NewPointer(
-			C.newVZMacOSBootLoader(),
+			objc.New("VZMacOSBootLoader", "init"),
 		),
 	}
 	objc.SetFinalizer(bootLoader, func(self *MacOSBootLoader) {

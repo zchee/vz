@@ -1,11 +1,5 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_11.h"
-*/
-import "C"
 import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -43,7 +37,7 @@ func NewVirtioTraditionalMemoryBalloonDeviceConfiguration() (*VirtioTraditionalM
 
 	config := &VirtioTraditionalMemoryBalloonDeviceConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZVirtioTraditionalMemoryBalloonDeviceConfiguration(),
+			objc.New("VZVirtioTraditionalMemoryBalloonDeviceConfiguration", "init"),
 		),
 	}
 	objc.SetFinalizer(config, func(self *VirtioTraditionalMemoryBalloonDeviceConfiguration) {
@@ -75,7 +69,7 @@ func (*baseMemoryBalloonDevice) memoryBalloonDevice() {}
 // This is only supported on macOS 11 and newer.
 func (v *VirtualMachine) MemoryBalloonDevices() []MemoryBalloonDevice {
 	nsArray := objc.NewNSArray(
-		C.VZVirtualMachine_memoryBalloonDevices(objc.Ptr(v)),
+		objc.SendPtr(objc.Ptr(v), "memoryBalloonDevices"),
 	)
 	ptrs := nsArray.ToPointerSlice()
 	devices := make([]MemoryBalloonDevice, len(ptrs))
@@ -125,16 +119,21 @@ func AsVirtioTraditionalMemoryBalloonDevice(device MemoryBalloonDevice) *VirtioT
 //
 // This is only supported on macOS 11 and newer.
 func (v *VirtioTraditionalMemoryBalloonDevice) SetTargetVirtualMachineMemorySize(targetMemorySize uint64) {
-	C.VZVirtioTraditionalMemoryBalloonDevice_setTargetVirtualMachineMemorySize(
-		objc.Ptr(v),
-		v.vm.dispatchQueue,
-		C.ulonglong(targetMemorySize),
-	)
+	objc.DispatchSync(v.vm.dispatchQueue, func() {
+		objc.SendVoid(objc.Ptr(v), "setTargetVirtualMachineMemorySize:", targetMemorySize)
+	})
 }
 
 // GetTargetVirtualMachineMemorySize returns the current target memory size in bytes for the virtual machine.
 //
 // This is only supported on macOS 11 and newer.
 func (v *VirtioTraditionalMemoryBalloonDevice) GetTargetVirtualMachineMemorySize() uint64 {
-	return uint64(C.VZVirtioTraditionalMemoryBalloonDevice_getTargetVirtualMachineMemorySize(objc.Ptr(v), v.vm.dispatchQueue))
+	var ret uint64
+	objc.DispatchSync(v.vm.dispatchQueue, func() {
+		ret = objc.Send[uint64](
+			objc.ID(uintptr(objc.Ptr(v))),
+			objc.RegisterName("targetVirtualMachineMemorySize"),
+		)
+	})
+	return ret
 }

@@ -1,11 +1,5 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation
-# include "virtualization_helper.h"
-*/
-import "C"
 import (
 	"errors"
 	"fmt"
@@ -68,12 +62,24 @@ func macOSMajorMinorVersion() float64 {
 	return majorMinorVersion
 }
 
+// newestRecognizedMacOSTarget is the highest __MAC_*_0 value handled by the
+// switch in macOSBuildTargetAvailable. Keep it in sync with the newest case
+// there.
+const newestRecognizedMacOSTarget = 150000 // __MAC_15_0
+
 var (
 	maxAllowedVersion     int
 	maxAllowedVersionOnce interface{ Do(func()) } = &sync.Once{}
 
+	// getMaxAllowedVersion reports the maximum macOS API version the binary was
+	// built against. Under purego there is no Objective-C/C compile step and so
+	// no __MAC_OS_X_VERSION_MAX_ALLOWED ceiling: classes and selectors resolve
+	// at runtime via dlopen, so every macOS target this package recognizes is
+	// always built in. Report the newest recognized target so the build-target
+	// check never rejects a supported API; macOSMajorMinorVersion still gates
+	// what the running host can actually launch.
 	getMaxAllowedVersion = func() int {
-		return int(C.mac_os_x_version_max_allowed())
+		return newestRecognizedMacOSTarget
 	}
 )
 
