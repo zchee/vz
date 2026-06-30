@@ -1,11 +1,5 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_13.h"
-*/
-import "C"
 import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -46,7 +40,7 @@ func NewVirtioGraphicsDeviceConfiguration() (*VirtioGraphicsDeviceConfiguration,
 	}
 	graphicsConfiguration := &VirtioGraphicsDeviceConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZVirtioGraphicsDeviceConfiguration(),
+			objc.New("VZVirtioGraphicsDeviceConfiguration", "init"),
 		),
 	}
 	objc.SetFinalizer(graphicsConfiguration, func(self *VirtioGraphicsDeviceConfiguration) {
@@ -64,7 +58,7 @@ func (v *VirtioGraphicsDeviceConfiguration) SetScanouts(scanoutConfigs ...*Virti
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setScanoutsVZVirtioGraphicsDeviceConfiguration(objc.Ptr(v), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(v), "setScanouts:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // VirtioGraphicsScanoutConfiguration is the configuration for a Virtio graphics device
@@ -78,16 +72,18 @@ type VirtioGraphicsScanoutConfiguration struct {
 //
 // This is only supported on macOS 13 and newer, error will
 // be returned on older versions.
-func NewVirtioGraphicsScanoutConfiguration(widthInPixels int64, heightInPixels int64) (*VirtioGraphicsScanoutConfiguration, error) {
+func NewVirtioGraphicsScanoutConfiguration(widthInPixels, heightInPixels int64) (*VirtioGraphicsScanoutConfiguration, error) {
 	if err := macOSAvailable(13); err != nil {
 		return nil, err
 	}
 
 	graphicsScanoutConfiguration := &VirtioGraphicsScanoutConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZVirtioGraphicsScanoutConfiguration(
-				C.NSInteger(widthInPixels),
-				C.NSInteger(heightInPixels),
+			objc.New(
+				"VZVirtioGraphicsScanoutConfiguration",
+				"initWithWidthInPixels:heightInPixels:",
+				widthInPixels,
+				heightInPixels,
 			),
 		),
 	}

@@ -14,7 +14,7 @@ import (
 // Note that if you have specified a pathname which already exists, this function
 // returns os.ErrExist error. So you can handle it with os.IsExist function.
 func CreateDiskImage(pathname string, size int64) error {
-	f, err := os.OpenFile(pathname, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := os.OpenFile(pathname, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}

@@ -3,12 +3,6 @@
 
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_12_arm64.h"
-*/
-import "C"
 import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -46,7 +40,7 @@ type MacPlatformConfigurationOption func(*MacPlatformConfiguration)
 func WithMacHardwareModel(m *MacHardwareModel) MacPlatformConfigurationOption {
 	return func(mpc *MacPlatformConfiguration) {
 		mpc.hardwareModel = m
-		C.setHardwareModelVZMacPlatformConfiguration(objc.Ptr(mpc), objc.Ptr(m))
+		objc.SendVoid(objc.Ptr(mpc), "setHardwareModel:", objc.Ptr(m))
 	}
 }
 
@@ -54,7 +48,7 @@ func WithMacHardwareModel(m *MacHardwareModel) MacPlatformConfigurationOption {
 func WithMacMachineIdentifier(m *MacMachineIdentifier) MacPlatformConfigurationOption {
 	return func(mpc *MacPlatformConfiguration) {
 		mpc.machineIdentifier = m
-		C.setMachineIdentifierVZMacPlatformConfiguration(objc.Ptr(mpc), objc.Ptr(m))
+		objc.SendVoid(objc.Ptr(mpc), "setMachineIdentifier:", objc.Ptr(m))
 	}
 }
 
@@ -62,7 +56,7 @@ func WithMacMachineIdentifier(m *MacMachineIdentifier) MacPlatformConfigurationO
 func WithMacAuxiliaryStorage(m *MacAuxiliaryStorage) MacPlatformConfigurationOption {
 	return func(mpc *MacPlatformConfiguration) {
 		mpc.auxiliaryStorage = m
-		C.setAuxiliaryStorageVZMacPlatformConfiguration(objc.Ptr(mpc), objc.Ptr(m))
+		objc.SendVoid(objc.Ptr(mpc), "setAuxiliaryStorage:", objc.Ptr(m))
 	}
 }
 
@@ -77,7 +71,7 @@ func NewMacPlatformConfiguration(opts ...MacPlatformConfigurationOption) (*MacPl
 
 	platformConfig := &MacPlatformConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZMacPlatformConfiguration(),
+			objc.New("VZMacPlatformConfiguration", "init"),
 		),
 	}
 	for _, optFunc := range opts {

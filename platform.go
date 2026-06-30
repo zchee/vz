@@ -1,14 +1,5 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_11.h"
-# include "virtualization_12.h"
-# include "virtualization_13.h"
-# include "virtualization_15.h"
-*/
-import "C"
 import (
 	"os"
 	"unsafe"
@@ -47,7 +38,8 @@ func IsNestedVirtualizationSupported() bool {
 		return false
 	}
 
-	return (bool)(C.isNestedVirtualizationSupported())
+	class := objc.GetClass("VZGenericPlatformConfiguration")
+	return objc.Send[bool](objc.ID(class), objc.RegisterName("isNestedVirtualizationSupported"))
 }
 
 // SetNestedVirtualizationEnabled toggles nested virtualization.
@@ -56,10 +48,7 @@ func (m *GenericPlatformConfiguration) SetNestedVirtualizationEnabled(enable boo
 		return err
 	}
 
-	C.setNestedVirtualizationEnabled(
-		objc.Ptr(m),
-		C.bool(enable),
-	)
+	objc.SendVoid(objc.Ptr(m), "setNestedVirtualizationEnabled:", enable)
 	return nil
 }
 
@@ -76,7 +65,7 @@ func NewGenericPlatformConfiguration(opts ...GenericPlatformConfigurationOption)
 
 	platformConfig := &GenericPlatformConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZGenericPlatformConfiguration(),
+			objc.New("VZGenericPlatformConfiguration", "init"),
 		),
 	}
 	for _, optFunc := range opts {
@@ -119,9 +108,14 @@ func NewGenericMachineIdentifierWithData(b []byte) (*GenericMachineIdentifier, e
 		return nil, err
 	}
 
-	ptr := C.newVZGenericMachineIdentifierWithBytes(
+	nsData := objc.New(
+		"NSData", "initWithBytes:length:",
 		unsafe.Pointer(&b[0]),
-		C.int(len(b)),
+		uint64(len(b)),
+	)
+	ptr := objc.New(
+		"VZGenericMachineIdentifier", "initWithDataRepresentation:",
+		nsData,
 	)
 	return newGenericMachineIdentifier(ptr), nil
 }
@@ -141,16 +135,18 @@ func NewGenericMachineIdentifier() (*GenericMachineIdentifier, error) {
 	if err := macOSAvailable(13); err != nil {
 		return nil, err
 	}
-	return newGenericMachineIdentifier(C.newVZGenericMachineIdentifier()), nil
+	return newGenericMachineIdentifier(objc.New("VZGenericMachineIdentifier", "init")), nil
 }
 
 func newGenericMachineIdentifier(ptr unsafe.Pointer) *GenericMachineIdentifier {
-	dataRepresentation := C.getVZGenericMachineIdentifierDataRepresentation(ptr)
-	bytePointer := (*byte)(unsafe.Pointer(dataRepresentation.ptr))
+	data := objc.SendPtr(ptr, "dataRepresentation")
+	dataID := objc.ID(uintptr(data))
+	bytePointer := (*byte)(objc.Send[unsafe.Pointer](dataID, objc.RegisterName("bytes")))
+	length := int(objc.Send[uint64](dataID, objc.RegisterName("length")))
 	return &GenericMachineIdentifier{
 		pointer: objc.NewPointer(ptr),
 		// https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
-		dataRepresentation: unsafe.Slice(bytePointer, dataRepresentation.len),
+		dataRepresentation: unsafe.Slice(bytePointer, length),
 	}
 }
 
@@ -171,7 +167,7 @@ func WithGenericMachineIdentifier(m *GenericMachineIdentifier) GenericPlatformCo
 			return err
 		}
 		mpc.machineIdentifier = m
-		C.setMachineIdentifierVZGenericPlatformConfiguration(objc.Ptr(mpc), objc.Ptr(m))
+		objc.SendVoid(objc.Ptr(mpc), "setMachineIdentifier:", objc.Ptr(m))
 		return nil
 	}
 }

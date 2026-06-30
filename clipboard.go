@@ -1,12 +1,8 @@
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_13.h"
-*/
-import "C"
 import (
+	"unsafe"
+
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
 
@@ -34,7 +30,7 @@ func NewSpiceAgentPortAttachment() (*SpiceAgentPortAttachment, error) {
 	}
 	spiceAgent := &SpiceAgentPortAttachment{
 		pointer: objc.NewPointer(
-			C.newVZSpiceAgentPortAttachment(),
+			objc.New("VZSpiceAgentPortAttachment", "init"),
 		),
 		enabledSharesClipboard: true,
 	}
@@ -46,10 +42,7 @@ func NewSpiceAgentPortAttachment() (*SpiceAgentPortAttachment, error) {
 
 // SetSharesClipboard sets enable the Spice agent clipboard sharing capability.
 func (s *SpiceAgentPortAttachment) SetSharesClipboard(enable bool) {
-	C.setSharesClipboardVZSpiceAgentPortAttachment(
-		objc.Ptr(s),
-		C.bool(enable),
-	)
+	objc.SendVoid(objc.Ptr(s), "setSharesClipboard:", enable)
 	s.enabledSharesClipboard = enable
 }
 
@@ -61,6 +54,7 @@ func SpiceAgentPortAttachmentName() (string, error) {
 	if err := macOSAvailable(13); err != nil {
 		return "", err
 	}
-	cstring := (*char)(C.getSpiceAgentPortName())
-	return cstring.String(), nil
+	class := objc.GetClass("VZSpiceAgentPortAttachment")
+	name := objc.Send[unsafe.Pointer](objc.ID(class), objc.RegisterName("spiceAgentPortName"))
+	return objc.Send[string](objc.ID(uintptr(name)), objc.RegisterName("UTF8String")), nil
 }

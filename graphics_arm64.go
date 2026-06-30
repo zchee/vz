@@ -3,12 +3,6 @@
 
 package vz
 
-/*
-#cgo darwin CFLAGS: -mmacosx-version-min=11 -x objective-c -fno-objc-arc
-#cgo darwin LDFLAGS: -lobjc -framework Foundation -framework Virtualization
-# include "virtualization_12_arm64.h"
-*/
-import "C"
 import (
 	"github.com/Code-Hex/vz/v3/internal/objc"
 )
@@ -33,7 +27,7 @@ func NewMacGraphicsDeviceConfiguration() (*MacGraphicsDeviceConfiguration, error
 
 	graphicsConfiguration := &MacGraphicsDeviceConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZMacGraphicsDeviceConfiguration(),
+			objc.New("VZMacGraphicsDeviceConfiguration", "init"),
 		),
 	}
 	objc.SetFinalizer(graphicsConfiguration, func(self *MacGraphicsDeviceConfiguration) {
@@ -49,7 +43,7 @@ func (m *MacGraphicsDeviceConfiguration) SetDisplays(displayConfigs ...*MacGraph
 		ptrs[i] = val
 	}
 	array := objc.ConvertToNSMutableArray(ptrs)
-	C.setDisplaysVZMacGraphicsDeviceConfiguration(objc.Ptr(m), objc.Ptr(array))
+	objc.SendVoid(objc.Ptr(m), "setDisplays:", objc.SendPtr(objc.Ptr(array), "copy"))
 }
 
 // MacGraphicsDisplayConfiguration is the configuration for a Mac graphics device.
@@ -63,17 +57,19 @@ type MacGraphicsDisplayConfiguration struct {
 //
 // This is only supported on macOS 12 and newer, error will
 // be returned on older versions.
-func NewMacGraphicsDisplayConfiguration(widthInPixels int64, heightInPixels int64, pixelsPerInch int64) (*MacGraphicsDisplayConfiguration, error) {
+func NewMacGraphicsDisplayConfiguration(widthInPixels, heightInPixels, pixelsPerInch int64) (*MacGraphicsDisplayConfiguration, error) {
 	if err := macOSAvailable(12); err != nil {
 		return nil, err
 	}
 
 	graphicsDisplayConfiguration := &MacGraphicsDisplayConfiguration{
 		pointer: objc.NewPointer(
-			C.newVZMacGraphicsDisplayConfiguration(
-				C.NSInteger(widthInPixels),
-				C.NSInteger(heightInPixels),
-				C.NSInteger(pixelsPerInch),
+			objc.New(
+				"VZMacGraphicsDisplayConfiguration",
+				"initWithWidthInPixels:heightInPixels:pixelsPerInch:",
+				widthInPixels,
+				heightInPixels,
+				pixelsPerInch,
 			),
 		),
 	}
