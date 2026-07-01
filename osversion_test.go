@@ -334,6 +334,56 @@ func TestAvailableVersion(t *testing.T) {
 		}
 	})
 
+	t.Run("macOS 15", func(t *testing.T) {
+		if macOSBuildTargetAvailable(15) != nil {
+			t.Skip("disabled build target for macOS 15")
+		}
+
+		majorMinorVersion = 14
+		cases := map[string]func() error{
+			"NewXHCIControllerConfiguration": func() error {
+				_, err := NewXHCIControllerConfiguration()
+				return err
+			},
+			"NewUSBMassStorageDevice": func() error {
+				_, err := NewUSBMassStorageDevice(nil)
+				return err
+			},
+		}
+		for name, fn := range cases {
+			t.Run(name, func(t *testing.T) {
+				err := fn()
+				if !errors.Is(err, ErrUnsupportedOSVersion) {
+					t.Fatalf("unexpected error %v in %s", err, name)
+				}
+			})
+		}
+	})
+
+	t.Run("macOS 27", func(t *testing.T) {
+		if macOSBuildTargetAvailable(27) != nil {
+			t.Skip("disabled build target for macOS 27")
+		}
+
+		majorMinorVersion = 26
+		cases := map[string]func() error{
+			"NewMacGuestProvisioningOptions": func() error {
+				_, err := NewMacGuestProvisioningOptions()
+				return err
+			},
+			"WithGuestProvisioningOptions": func() error {
+				return WithGuestProvisioningOptions(nil)(&virtualMachineStartOptions{})
+			},
+		}
+		for name, fn := range cases {
+			t.Run(name, func(t *testing.T) {
+				err := fn()
+				if !errors.Is(err, ErrUnsupportedOSVersion) {
+					t.Fatalf("unexpected error %v in %s", err, name)
+				}
+			})
+		}
+	})
 }
 
 func Test_fetchMajorMinorVersion(t *testing.T) {

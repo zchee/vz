@@ -254,7 +254,10 @@ type USBMassStorageDeviceConfiguration struct {
 	*pointer
 
 	*baseStorageDeviceConfiguration
+	*baseUSBDeviceConfiguration
 }
+
+var _ USBDeviceConfiguration = (*USBMassStorageDeviceConfiguration)(nil)
 
 // NewUSBMassStorageDeviceConfiguration initialize a USBMassStorageDeviceConfiguration
 // with a device attachment.

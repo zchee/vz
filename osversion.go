@@ -65,7 +65,7 @@ func macOSMajorMinorVersion() float64 {
 // newestRecognizedMacOSTarget is the highest __MAC_*_0 value handled by the
 // switch in macOSBuildTargetAvailable. Keep it in sync with the newest case
 // there.
-const newestRecognizedMacOSTarget = 150000 // __MAC_15_0
+const newestRecognizedMacOSTarget = 270000 // __MAC_27_0
 
 var (
 	maxAllowedVersion     int
@@ -113,6 +113,8 @@ func macOSBuildTargetAvailable(version float64) error {
 		target = 140000 // __MAC_14_0
 	case 15:
 		target = 150000 // __MAC_15_0
+	case 27:
+		target = 270000 // __MAC_27_0
 	}
 	if allowedVersion < target {
 		return fmt.Errorf("%w for %.1f (the binary was built with __MAC_OS_X_VERSION_MAX_ALLOWED=%d; needs recompilation)",

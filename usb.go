@@ -29,6 +29,20 @@ type baseUSBControllerConfiguration struct{}
 
 func (*baseUSBControllerConfiguration) usbControllerConfiguration() {}
 
+// USBDeviceConfiguration is an interface for a USB device configuration that a
+// USB controller can start with (VZUSBDeviceConfiguration).
+//
+// see: https://developer.apple.com/documentation/virtualization/vzusbdeviceconfiguration?language=objc
+type USBDeviceConfiguration interface {
+	objc.NSObject
+
+	usbDeviceConfiguration()
+}
+
+type baseUSBDeviceConfiguration struct{}
+
+func (*baseUSBDeviceConfiguration) usbDeviceConfiguration() {}
+
 // XHCIControllerConfiguration is a configuration of the USB XHCI controller.
 //
 // This configuration creates a USB XHCI controller device for the guest.
@@ -37,6 +51,8 @@ type XHCIControllerConfiguration struct {
 	*pointer
 
 	*baseUSBControllerConfiguration
+
+	usbDevices []USBDeviceConfiguration
 }
 
 var _ USBControllerConfiguration = (*XHCIControllerConfiguration)(nil)
@@ -58,6 +74,28 @@ func NewXHCIControllerConfiguration() (*XHCIControllerConfiguration, error) {
 		objc.Release(self)
 	})
 	return config, nil
+}
+
+// SetUSBDevices sets the list of USB devices the controller starts with. Each
+// device is created as a runtime object in the controller's usbDevices property
+// when the virtual machine starts.
+//
+// This is only supported on macOS 15 and newer; older versions do nothing.
+//
+// see: https://developer.apple.com/documentation/virtualization/vzusbcontrollerconfiguration/usbdevices?language=objc
+func (c *XHCIControllerConfiguration) SetUSBDevices(devices []USBDeviceConfiguration) {
+	if err := macOSAvailable(15); err != nil {
+		return
+	}
+	ptrs := make([]objc.NSObject, len(devices))
+	for i, d := range devices {
+		ptrs[i] = d
+	}
+	array := objc.ConvertToNSMutableArray(ptrs)
+	objc.SendVoid(objc.Ptr(c), "setUsbDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
+	// Retain the Go configs for the controller config's lifetime so their
+	// Objective-C objects are not finalized while VZ holds the copied array.
+	c.usbDevices = devices
 }
 
 // USBController is representing a USB controller in a virtual machine.

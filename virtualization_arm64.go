@@ -31,9 +31,96 @@ func WithStartUpFromMacOSRecovery(startInRecovery bool) VirtualMachineStartOptio
 		if err := macOSAvailable(13); err != nil {
 			return err
 		}
-		opts := objc.New("VZMacOSVirtualMachineStartOptions", "init")
-		objc.SendVoid(opts, "setStartUpFromMacOSRecovery:", startInRecovery)
-		vmso.macOSVirtualMachineStartOptionsPtr = opts
+		if vmso.macOSVirtualMachineStartOptionsPtr == nil {
+			vmso.macOSVirtualMachineStartOptionsPtr = objc.New("VZMacOSVirtualMachineStartOptions", "init")
+		}
+		objc.SendVoid(vmso.macOSVirtualMachineStartOptionsPtr, "setStartUpFromMacOSRecovery:", startInRecovery)
+		return nil
+	}
+}
+
+// MacGuestProvisioningOptions configures automated setup of a macOS guest during
+// startup: a user account and initial setup workflow that run without manual
+// intervention.
+//
+// macOS only evaluates these options on the first boot after restore; the
+// framework can't use them to reconfigure macOS once it has provisioned it, and
+// changes after starting the virtual machine have no effect.
+//
+// This is only supported on macOS 27 and newer.
+//
+// see: https://developer.apple.com/documentation/virtualization/vzmacguestprovisioningoptions?language=objc
+type MacGuestProvisioningOptions struct {
+	*pointer
+}
+
+// NewMacGuestProvisioningOptions creates a new MacGuestProvisioningOptions.
+//
+// This is only supported on macOS 27 and newer, error will
+// be returned on older versions.
+func NewMacGuestProvisioningOptions() (*MacGuestProvisioningOptions, error) {
+	if err := macOSAvailable(27); err != nil {
+		return nil, err
+	}
+	opts := &MacGuestProvisioningOptions{
+		pointer: objc.NewPointer(
+			objc.New("VZMacGuestProvisioningOptions", "init"),
+		),
+	}
+	objc.SetFinalizer(opts, func(self *MacGuestProvisioningOptions) {
+		objc.Release(self)
+	})
+	return opts, nil
+}
+
+// SetFullName sets the full name to configure for the macOS virtual machine.
+func (o *MacGuestProvisioningOptions) SetFullName(fullName string) {
+	objc.SendVoid(objc.Ptr(o), "setFullName:", objc.NSString(fullName))
+}
+
+// SetUsername sets the account name to configure for the macOS virtual machine.
+func (o *MacGuestProvisioningOptions) SetUsername(username string) {
+	objc.SendVoid(objc.Ptr(o), "setUsername:", objc.NSString(username))
+}
+
+// SetPassword sets the password to configure for the macOS virtual machine.
+func (o *MacGuestProvisioningOptions) SetPassword(password string) {
+	objc.SendVoid(objc.Ptr(o), "setPassword:", objc.NSString(password))
+}
+
+// SetLogsInAutomatically sets whether to automatically log in the person at startup.
+func (o *MacGuestProvisioningOptions) SetLogsInAutomatically(enable bool) {
+	objc.SendVoid(objc.Ptr(o), "setLogsInAutomatically:", enable)
+}
+
+// SetEnablesRemoteLogin sets whether to enable Remote Login (SSH) for the macOS virtual machine.
+func (o *MacGuestProvisioningOptions) SetEnablesRemoteLogin(enable bool) {
+	objc.SendVoid(objc.Ptr(o), "setEnablesRemoteLogin:", enable)
+}
+
+// WithGuestProvisioningOptions sets guest provisioning options applied on the
+// first boot after restore of a macOS virtual machine.
+//
+// This is only supported on macOS 27 and newer, error will
+// be returned on older versions.
+func WithGuestProvisioningOptions(opts *MacGuestProvisioningOptions) VirtualMachineStartOption {
+	return func(vmso *virtualMachineStartOptions) error {
+		if err := macOSAvailable(27); err != nil {
+			return err
+		}
+		if vmso.macOSVirtualMachineStartOptionsPtr == nil {
+			vmso.macOSVirtualMachineStartOptionsPtr = objc.New("VZMacOSVirtualMachineStartOptions", "init")
+		}
+		errSlot := objc.NewErrorSlot()
+		defer objc.Free(errSlot)
+		objc.Send[bool](
+			objc.ID(uintptr(vmso.macOSVirtualMachineStartOptionsPtr)),
+			objc.RegisterName("setGuestProvisioningOptions:error:"),
+			objc.Ptr(opts), errSlot,
+		)
+		if err := newNSError(objc.ErrorFromSlot(errSlot)); err != nil {
+			return err
+		}
 		return nil
 	}
 }
