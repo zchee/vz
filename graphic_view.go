@@ -52,7 +52,10 @@ const (
 
 	nsToolbarDisplayModeIconOnly = 2
 
-	nsTextAlignmentCenter  = 2 // macOS value (TARGET_ABI_USES_IOS_VALUES is 0)
+	// On arm64 macOS, TARGET_ABI_USES_IOS_VALUES is 1 (it is
+	// !TARGET_CPU_X86_64), so NSTextAlignment uses the iOS values where
+	// NSTextAlignmentCenter is 1, not the historical x86_64 value of 2.
+	nsTextAlignmentCenter  = 1
 	nsUnderlineStyleSingle = 1
 
 	nsLayoutConstraintOrientationHorizontal   = 0
