@@ -83,12 +83,6 @@ type VirtualMachine struct {
 	// id for this struct.
 	id string
 
-	// Indicate whether or not virtualization is available.
-	//
-	// If virtualization is unavailable, no VirtualMachineConfiguration will validate.
-	// The validation error of the VirtualMachineConfiguration provides more information about why virtualization is unavailable.
-	supported bool
-
 	*pointer
 	dispatchQueue unsafe.Pointer
 	machineState  *machineState
@@ -378,24 +372,27 @@ func (v *VirtualMachine) CanStop() bool {
 	return v.canDispatch("canStop")
 }
 
-func makeHandler() (func(error), chan error) {
-	ch := make(chan error, 1)
-	return func(err error) {
-		ch <- err
-		close(ch)
-	}, ch
-}
-
-// completionBlockError builds a void(^)(NSError *) completion block that
-// forwards the framework's error (or nil) to ch exactly once.
-func completionBlockError(ch chan error) objc.Block {
-	return objc.BlockError(func(errPtr unsafe.Pointer) {
+// completionCall issues sel — whose final argument is a completionHandler: —
+// on target, dispatched on the VM's serial queue, and waits for the completion
+// handler to fire. args are the selector's leading arguments; the completion
+// block is appended as the final argument. The block is released only after the
+// result is received, since the framework retains its own copy across the
+// asynchronous completion.
+func completionCall(queue, target unsafe.Pointer, sel string, args ...any) error {
+	errCh := make(chan error, 1)
+	block := objc.BlockError(func(errPtr unsafe.Pointer) {
 		if err := newNSError(errPtr); err != nil {
-			ch <- err
+			errCh <- err
 		} else {
-			ch <- nil
+			errCh <- nil
 		}
 	})
+	objc.DispatchSync(queue, func() {
+		objc.SendVoid(target, sel, append(args, block)...)
+	})
+	err := <-errCh
+	block.Release()
+	return err
 }
 
 type virtualMachineStartOptions struct {
@@ -419,48 +416,25 @@ func (v *VirtualMachine) Start(opts ...VirtualMachineStartOption) error {
 		}
 	}
 
-	errCh := make(chan error, 1)
-	block := completionBlockError(errCh)
-	objc.DispatchSync(v.dispatchQueue, func() {
-		if o.macOSVirtualMachineStartOptionsPtr != nil {
-			objc.SendVoid(objc.Ptr(v), "startWithOptions:completionHandler:",
-				o.macOSVirtualMachineStartOptionsPtr, block)
-		} else {
-			objc.SendVoid(objc.Ptr(v), "startWithCompletionHandler:", block)
-		}
-	})
-	err := <-errCh
-	block.Release()
-	return err
-}
-
-// lifecycle issues a control selector taking a single completionHandler: on the
-// VM's queue and waits for the completion handler to fire. The completion block
-// is released only after the result has been received; the framework retains its
-// own copy across the asynchronous completion.
-func (v *VirtualMachine) lifecycle(sel string) error {
-	errCh := make(chan error, 1)
-	block := completionBlockError(errCh)
-	objc.DispatchSync(v.dispatchQueue, func() {
-		objc.SendVoid(objc.Ptr(v), sel, block)
-	})
-	err := <-errCh
-	block.Release()
-	return err
+	if o.macOSVirtualMachineStartOptionsPtr != nil {
+		return completionCall(v.dispatchQueue, objc.Ptr(v),
+			"startWithOptions:completionHandler:", o.macOSVirtualMachineStartOptionsPtr)
+	}
+	return completionCall(v.dispatchQueue, objc.Ptr(v), "startWithCompletionHandler:")
 }
 
 // Pause a virtual machine that is in Running state.
 //
 // If you want to listen status change events, use the "StateChangedNotify" method.
 func (v *VirtualMachine) Pause() error {
-	return v.lifecycle("pauseWithCompletionHandler:")
+	return completionCall(v.dispatchQueue, objc.Ptr(v), "pauseWithCompletionHandler:")
 }
 
 // Resume a virtual machine that is in the Paused state.
 //
 // If you want to listen status change events, use the "StateChangedNotify" method.
 func (v *VirtualMachine) Resume() error {
-	return v.lifecycle("resumeWithCompletionHandler:")
+	return completionCall(v.dispatchQueue, objc.Ptr(v), "resumeWithCompletionHandler:")
 }
 
 // RequestStop requests that the guest turns itself off.
@@ -499,7 +473,7 @@ func (v *VirtualMachine) Stop() error {
 	if err := macOSAvailable(12); err != nil {
 		return err
 	}
-	return v.lifecycle("stopWithCompletionHandler:")
+	return completionCall(v.dispatchQueue, objc.Ptr(v), "stopWithCompletionHandler:")
 }
 
 // DisconnectedError represents an error that occurs when a VM’s network attachment is disconnected

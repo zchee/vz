@@ -491,43 +491,36 @@ func (st *graphicWindow) vmCan(sel string) bool {
 	return ret
 }
 
+// vmControlOnQueue issues a completion-handler VM control selector on the VM's
+// queue and shows an alert on failure. The caller must already be on the main
+// thread.
+func (st *graphicWindow) vmControlOnQueue(sel, failMsg string) {
+	objc.DispatchSync(st.queue, func() {
+		block := objc.BlockError(func(errPtr unsafe.Pointer) {
+			if errPtr != nil {
+				st.showErrorAlert(failMsg, errPtr)
+			}
+		})
+		msgv(st.vm, sel, block)
+	})
+}
+
 func (st *graphicWindow) pauseClicked() {
 	objc.DispatchAsyncMain(func() {
-		objc.DispatchSync(st.queue, func() {
-			block := objc.BlockError(func(errPtr unsafe.Pointer) {
-				if errPtr != nil {
-					st.showErrorAlert("Failed to pause Virtual Machine", errPtr)
-				}
-			})
-			msgv(st.vm, "pauseWithCompletionHandler:", block)
-		})
+		st.vmControlOnQueue("pauseWithCompletionHandler:", "Failed to pause Virtual Machine")
 	})
 }
 
 func (st *graphicWindow) playClicked() {
 	objc.DispatchAsyncMain(func() {
-		objc.DispatchSync(st.queue, func() {
-			block := objc.BlockError(func(errPtr unsafe.Pointer) {
-				if errPtr != nil {
-					st.showErrorAlert("Failed to resume Virtual Machine", errPtr)
-				}
-			})
-			msgv(st.vm, "resumeWithCompletionHandler:", block)
-		})
+		st.vmControlOnQueue("resumeWithCompletionHandler:", "Failed to resume Virtual Machine")
 	})
 }
 
 func (st *graphicWindow) powerClicked() {
 	objc.DispatchAsyncMain(func() {
 		if st.vmCan("canStart") {
-			objc.DispatchSync(st.queue, func() {
-				block := objc.BlockError(func(errPtr unsafe.Pointer) {
-					if errPtr != nil {
-						st.showErrorAlert("Failed to start Virtual Machine", errPtr)
-					}
-				})
-				msgv(st.vm, "startWithCompletionHandler:", block)
-			})
+			st.vmControlOnQueue("startWithCompletionHandler:", "Failed to start Virtual Machine")
 			return
 		}
 		if st.vmCan("canStop") {
@@ -542,14 +535,7 @@ func (st *graphicWindow) powerClicked() {
 			if response != nsAlertFirstButtonReturn {
 				return
 			}
-			objc.DispatchSync(st.queue, func() {
-				block := objc.BlockError(func(errPtr unsafe.Pointer) {
-					if errPtr != nil {
-						st.showErrorAlert("Failed to stop Virtual Machine", errPtr)
-					}
-				})
-				msgv(st.vm, "stopWithCompletionHandler:", block)
-			})
+			st.vmControlOnQueue("stopWithCompletionHandler:", "Failed to stop Virtual Machine")
 		}
 	})
 }

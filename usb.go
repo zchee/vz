@@ -74,24 +74,9 @@ func newUSBController(ptr, dispatchQueue unsafe.Pointer) *USBController {
 }
 
 // attachDetach drives a USB attach or detach through the controller's queue and
-// waits for the completion handler. The completion block is built in Go and
-// captures the result handler directly; it is released only after the handler
-// has fired (the framework retains its own copy across the async completion).
+// waits for the completion handler.
 func (u *USBController) attachDetach(selector string, device USBDevice) error {
-	h, errCh := makeHandler()
-	block := objc.BlockError(func(errPtr unsafe.Pointer) {
-		if err := newNSError(errPtr); err != nil {
-			h(err)
-		} else {
-			h(nil)
-		}
-	})
-	objc.DispatchSync(u.dispatchQueue, func() {
-		objc.SendVoid(objc.Ptr(u), selector, objc.Ptr(device), block)
-	})
-	err := <-errCh
-	block.Release()
-	return err
+	return completionCall(u.dispatchQueue, objc.Ptr(u), selector, objc.Ptr(device))
 }
 
 // Attach attaches a USB device.

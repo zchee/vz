@@ -645,15 +645,7 @@ func (m *MacOSInstaller) Done() <-chan struct{} { return m.doneCh }
 // saveRestore issues a save/restore selector (which takes a file URL and a
 // completionHandler:) on the VM's queue and waits for the completion handler.
 func (v *VirtualMachine) saveRestore(sel, saveFilePath string) error {
-	errCh := make(chan error, 1)
-	block := completionBlockError(errCh)
-	fileURL := objc.FileURL(saveFilePath)
-	objc.DispatchSync(v.dispatchQueue, func() {
-		objc.SendVoid(objc.Ptr(v), sel, fileURL, block)
-	})
-	err := <-errCh
-	block.Release()
-	return err
+	return completionCall(v.dispatchQueue, objc.Ptr(v), sel, objc.FileURL(saveFilePath))
 }
 
 // SaveMachineStateToPath saves the state of a VM.
