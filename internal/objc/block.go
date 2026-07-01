@@ -36,3 +36,19 @@ func BlockBoolError(fn func(ok bool, err unsafe.Pointer)) Block {
 func BlockDouble(fn func(value float64)) Block {
 	return pobjc.NewBlock(func(_ Block, value float64) { fn(value) })
 }
+
+// BlockObject builds a void(^)(id) block for callbacks that receive a single
+// object argument, such as the animation block of
+// +[NSAnimationContext runAnimationGroup:completionHandler:].
+func BlockObject(fn func(obj unsafe.Pointer)) Block {
+	return pobjc.NewBlock(func(_ Block, obj unsafe.Pointer) { fn(obj) })
+}
+
+// BlockEventMonitor builds an NSEvent *(^)(NSEvent *) block for
+// -[NSEvent addLocalMonitorForEventsMatchingMask:handler:]. Returning the event
+// passes it along the responder chain; returning nil swallows it.
+func BlockEventMonitor(fn func(event unsafe.Pointer) unsafe.Pointer) Block {
+	return pobjc.NewBlock(func(_ Block, event unsafe.Pointer) unsafe.Pointer {
+		return fn(event)
+	})
+}
