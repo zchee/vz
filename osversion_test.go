@@ -374,6 +374,22 @@ func TestAvailableVersion(t *testing.T) {
 			"WithGuestProvisioningOptions": func() error {
 				return WithGuestProvisioningOptions(nil)(&virtualMachineStartOptions{})
 			},
+			"NewUSBAccessoryMatchingCriteria": func() error {
+				_, err := NewUSBAccessoryMatchingCriteria(0, 0)
+				return err
+			},
+			"FindUSBAccessories": func() error {
+				_, err := FindUSBAccessories()
+				return err
+			},
+			"NewUSBPassthroughDeviceConfiguration": func() error {
+				_, err := NewUSBPassthroughDeviceConfiguration(nil)
+				return err
+			},
+			"NewUSBPassthroughDevice": func() error {
+				_, err := NewUSBPassthroughDevice(nil)
+				return err
+			},
 		}
 		for name, fn := range cases {
 			t.Run(name, func(t *testing.T) {

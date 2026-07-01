@@ -1,6 +1,7 @@
 package vz
 
 import (
+	"fmt"
 	"unsafe"
 
 	"github.com/Code-Hex/vz/v3/internal/objc"
@@ -15,6 +16,28 @@ func NewUSBMassStorageDevice(config *USBMassStorageDeviceConfiguration) (USBDevi
 		return nil, err
 	}
 	ptr := objc.New("VZUSBMassStorageDevice", "initWithConfiguration:", objc.Ptr(config))
+	return newUSBDevice(ptr), nil
+}
+
+// NewUSBPassthroughDevice initialize the runtime USB passthrough device object
+// from its configuration. The returned device can be attached to a USB
+// controller with (*USBController).Attach.
+//
+// This is only supported on macOS 27 and newer, error will
+// be returned on older versions.
+func NewUSBPassthroughDevice(config *USBPassthroughDeviceConfiguration) (USBDevice, error) {
+	if err := macOSAvailable(27); err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return nil, fmt.Errorf("vz: nil USB passthrough device configuration")
+	}
+	errSlot := objc.NewErrorSlot()
+	defer objc.Free(errSlot)
+	ptr := objc.New("VZUSBPassthroughDevice", "initWithConfiguration:error:", objc.Ptr(config), errSlot)
+	if err := newNSError(objc.ErrorFromSlot(errSlot)); err != nil {
+		return nil, err
+	}
 	return newUSBDevice(ptr), nil
 }
 
@@ -42,6 +65,51 @@ type USBDeviceConfiguration interface {
 type baseUSBDeviceConfiguration struct{}
 
 func (*baseUSBDeviceConfiguration) usbDeviceConfiguration() {}
+
+// USBPassthroughDeviceConfiguration is a configuration for passing a physical
+// USB accessory through to a virtual machine.
+//
+// The USB accessory is captured when the virtual machine starts with this
+// configuration added to a USB controller (via XHCIControllerConfiguration.SetUSBDevices),
+// or when it is attached at runtime with (*USBController).Attach.
+//
+// see: https://developer.apple.com/documentation/virtualization/vzusbpassthroughdeviceconfiguration?language=objc
+type USBPassthroughDeviceConfiguration struct {
+	*pointer
+
+	*baseUSBDeviceConfiguration
+
+	// accessory is retained for the configuration's lifetime so its
+	// Objective-C object is not finalized while VZ references it.
+	accessory *USBAccessory
+}
+
+var _ USBDeviceConfiguration = (*USBPassthroughDeviceConfiguration)(nil)
+
+// NewUSBPassthroughDeviceConfiguration creates a USB passthrough device
+// configuration capturing the given USB accessory (obtained from
+// FindUSBAccessories).
+//
+// This is only supported on macOS 27 and newer, error will
+// be returned on older versions.
+func NewUSBPassthroughDeviceConfiguration(accessory *USBAccessory) (*USBPassthroughDeviceConfiguration, error) {
+	if err := macOSAvailable(27); err != nil {
+		return nil, err
+	}
+	if accessory == nil {
+		return nil, fmt.Errorf("vz: nil USB accessory")
+	}
+	config := &USBPassthroughDeviceConfiguration{
+		pointer: objc.NewPointer(
+			objc.New("VZUSBPassthroughDeviceConfiguration", "initWithDevice:", objc.Ptr(accessory)),
+		),
+		accessory: accessory,
+	}
+	objc.SetFinalizer(config, func(self *USBPassthroughDeviceConfiguration) {
+		objc.Release(self)
+	})
+	return config, nil
+}
 
 // XHCIControllerConfiguration is a configuration of the USB XHCI controller.
 //
