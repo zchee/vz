@@ -22,6 +22,21 @@ import (
 // see: https://developer.apple.com/documentation/virtualization/vzcustomvirtiodeviceconfiguration?language=objc
 type CustomVirtioDeviceConfiguration struct {
 	*pointer
+
+	// delegate and queue are the +1 Go-backed delegate object and the +1 device dispatch
+	// queue installed by SetHandler. The delegate provider holds only a WEAK reference to
+	// the delegate, so this +1 is its sole keep-alive.
+	//
+	// IMPORTANT (B2 scaffold): they are anchored to this configuration only because this
+	// slice never starts a virtual machine. Plan step 8 requires the keep-alive to be
+	// anchored to the VM-run-lifetime *CustomVirtioDevice wrapper, NOT the config — a
+	// config-anchored release frees the delegate mid-run and silently kills callbacks
+	// (pre-mortem #2). Before any VM starts, B3 MUST build that device wrapper in
+	// customVirtioConfiguration:didCreateDevice:, re-anchor these two +1 references to it,
+	// and set transferred=true so this finalizer stops owning them.
+	delegate    unsafe.Pointer
+	queue       unsafe.Pointer
+	transferred bool // always false in B2; B3 sets it during the didCreateDevice transfer
 }
 
 // NewCustomVirtioDeviceConfiguration creates a new custom Virtio device
@@ -39,6 +54,15 @@ func NewCustomVirtioDeviceConfiguration() (*CustomVirtioDeviceConfiguration, err
 		),
 	}
 	objc.SetFinalizer(config, func(self *CustomVirtioDeviceConfiguration) {
+		if !self.transferred {
+			if self.delegate != nil {
+				objc.Disassociate(uintptr(self.delegate))
+				objc.SendVoid(self.delegate, "release")
+			}
+			if self.queue != nil {
+				objc.ReleaseDispatch(self.queue)
+			}
+		}
 		objc.Release(self)
 	})
 	return config, nil
