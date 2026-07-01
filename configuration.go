@@ -172,6 +172,24 @@ func (v *VirtualMachineConfiguration) StorageDevices() []StorageDeviceConfigurat
 	return v.storageDeviceConfiguration
 }
 
+// SetCustomVirtioDevicesVirtualMachineConfiguration sets the list of custom Virtio
+// devices. Empty by default.
+//
+// Custom Virtio devices require macOS 27. Because the elements can only be created
+// with NewCustomVirtioDeviceConfiguration (which enforces the version), this setter
+// is intentionally not version-gated.
+func (v *VirtualMachineConfiguration) SetCustomVirtioDevicesVirtualMachineConfiguration(cs []*CustomVirtioDeviceConfiguration) {
+	ptrs := make([]objc.NSObject, len(cs))
+	for i, val := range cs {
+		ptrs[i] = val
+	}
+	array := objc.ConvertToNSMutableArray(ptrs)
+	// Unlike SetStorageDevices/SetUSBDevices, the Go slice is not retained on the
+	// receiver: there is no CustomVirtioDevices() getter, and the NSArray copy the
+	// configuration holds already retains the element objects.
+	objc.SendVoid(objc.Ptr(v), "setCustomVirtioDevices:", objc.SendPtr(objc.Ptr(array), "copy"))
+}
+
 // SetDirectorySharingDevicesVirtualMachineConfiguration sets list of directory sharing devices. Empty by default.
 //
 // This is only supported on macOS 12 and newer. Older versions do nothing.

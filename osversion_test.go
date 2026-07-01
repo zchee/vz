@@ -390,6 +390,14 @@ func TestAvailableVersion(t *testing.T) {
 				_, err := NewUSBPassthroughDevice(nil)
 				return err
 			},
+			"NewCustomVirtioDeviceConfiguration": func() error {
+				_, err := NewCustomVirtioDeviceConfiguration()
+				return err
+			},
+			"NewVirtioDeviceSpecificConfiguration": func() error {
+				_, err := NewVirtioDeviceSpecificConfiguration(nil)
+				return err
+			},
 		}
 		for name, fn := range cases {
 			t.Run(name, func(t *testing.T) {
