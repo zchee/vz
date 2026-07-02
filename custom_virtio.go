@@ -1,6 +1,7 @@
 package vz
 
 import (
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/Code-Hex/vz/v3/internal/objc"
@@ -36,7 +37,7 @@ type CustomVirtioDeviceConfiguration struct {
 	// and set transferred=true so this finalizer stops owning them.
 	delegate    unsafe.Pointer
 	queue       unsafe.Pointer
-	transferred bool // always false in B2; B3 sets it during the didCreateDevice transfer
+	transferred atomic.Bool // set by the didCreateDevice: transfer; read by the finalizer on a GC goroutine, hence atomic
 }
 
 // NewCustomVirtioDeviceConfiguration creates a new custom Virtio device
@@ -54,7 +55,7 @@ func NewCustomVirtioDeviceConfiguration() (*CustomVirtioDeviceConfiguration, err
 		),
 	}
 	objc.SetFinalizer(config, func(self *CustomVirtioDeviceConfiguration) {
-		if !self.transferred {
+		if !self.transferred.Load() {
 			if self.delegate != nil {
 				objc.Disassociate(uintptr(self.delegate))
 				objc.SendVoid(self.delegate, "release")

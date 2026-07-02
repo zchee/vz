@@ -21,7 +21,9 @@ type CustomVirtioHandler struct {
 	// DidAcceptDriverOK is called when the guest driver sets DRIVER_OK; after this
 	// the device's queues and negotiated features are valid.
 	DidAcceptDriverOK func(device *CustomVirtioDevice)
-	// DidReceiveNotificationForQueue is called when the guest kicks a virtqueue.
+	// DidReceiveNotificationForQueue is called when the guest kicks a virtqueue. The
+	// queue and device are valid only for the duration of this callback (on the device
+	// queue); do not retain them past it.
 	DidReceiveNotificationForQueue func(device *CustomVirtioDevice, queue *VirtioQueue)
 	// WillStop is called when the device stops (its virtual machine stopped).
 	WillStop func(device *CustomVirtioDevice)
@@ -41,6 +43,12 @@ type CustomVirtioHandler struct {
 // see: https://developer.apple.com/documentation/virtualization/vzcustomvirtiodevice?language=objc
 type CustomVirtioDevice struct {
 	*pointer
+
+	// delegate and queue are the +1 references transferred from the configuration at
+	// didCreateDevice: (see newCustomVirtioDevice). This wrapper releases them — and the
+	// framework device — in its finalizer.
+	delegate unsafe.Pointer
+	queue    unsafe.Pointer
 }
 
 // VirtioQueue is a virtqueue (Virtio queue) belonging to a custom Virtio device. Its
@@ -57,7 +65,8 @@ type VirtioQueue struct {
 // than in an ivar.
 type customVirtioState struct {
 	handler CustomVirtioHandler
-	device  *CustomVirtioDevice // nil in B2; B3 sets it in the didCreateDevice transfer (device-queue only)
+	config  *CustomVirtioDeviceConfiguration // back-ref, so didCreateDevice: can flip transferred
+	device  *CustomVirtioDevice              // set at didCreateDevice: (device-queue only)
 }
 
 const customVirtioDelegateClassName = "VZCustomVirtioGoDelegate"
@@ -107,12 +116,12 @@ func customVirtioDidCreateDevice(self objc.ID, _ objc.SEL, _, device unsafe.Poin
 	if st == nil {
 		return
 	}
-	// B2 stub: this slice never starts a VM, so the framework never calls this. B3
-	// completes ownership here — retaining the framework device, re-anchoring the +1
-	// delegate/queue to this wrapper, and setting transferred=true — and must confine
-	// st.device access to the device queue (the config finalizer runs off-queue).
+	// Runs on the device queue. Take ownership of the +1 delegate + +1 queue from the
+	// configuration onto the device wrapper (plan step 8), route the device's runtime
+	// callbacks to our delegate, then hand the wrapper to the user.
 	if st.device == nil && device != nil {
-		st.device = &CustomVirtioDevice{pointer: objc.NewPointer(device)}
+		st.device = newCustomVirtioDevice(device, st.config.delegate, st.config.queue, st.config)
+		objc.SendVoid(device, "setDelegate:", st.config.delegate)
 	}
 	if st.handler.DidCreateDevice != nil {
 		st.handler.DidCreateDevice(st.device)
@@ -169,17 +178,21 @@ func (c *CustomVirtioDeviceConfiguration) SetHandler(h CustomVirtioHandler) {
 	if err != nil || objc.ID(cls) == 0 {
 		return
 	}
-	// Replace any delegate + queue a previous SetHandler installed.
-	if c.delegate != nil {
-		objc.Disassociate(uintptr(c.delegate))
-		objc.SendVoid(c.delegate, "release")
-	}
-	if c.queue != nil {
-		objc.ReleaseDispatch(c.queue)
+	// Release any delegate + queue a previous SetHandler installed — but only if the
+	// configuration still owns them. After the didCreateDevice: transfer (transferred),
+	// the device wrapper owns them and must not be double-freed here.
+	if !c.transferred.Load() {
+		if c.delegate != nil {
+			objc.Disassociate(uintptr(c.delegate))
+			objc.SendVoid(c.delegate, "release")
+		}
+		if c.queue != nil {
+			objc.ReleaseDispatch(c.queue)
+		}
 	}
 	delegate := objc.NewObject(cls) // +1
 	queue := objc.DispatchQueueCreate(customVirtioDelegateClassName)
-	objc.Associate(uintptr(delegate), &customVirtioState{handler: h})
+	objc.Associate(uintptr(delegate), &customVirtioState{handler: h, config: c})
 
 	provider := objc.New(
 		"VZCustomVirtioDeviceDelegateProvider",
@@ -189,11 +202,11 @@ func (c *CustomVirtioDeviceConfiguration) SetHandler(h CustomVirtioHandler) {
 	objc.SendVoid(objc.Ptr(c), "setProvider:", provider)
 	objc.SendVoid(provider, "release") // the config's provider property (strong) keeps its own reference
 
-	// Own the delegate (+1) and queue (+1) on the configuration; the finalizer releases
-	// them. This is a B2 scaffold: because no VM starts here, config-anchoring is safe,
-	// but B3 MUST re-anchor them to the VM-run *CustomVirtioDevice wrapper and set
-	// transferred=true before any VM starts (see the field doc + plan step 8), otherwise
-	// dropping the config wrapper frees the delegate mid-run.
+	// The configuration owns the delegate (+1) and queue (+1); its finalizer releases
+	// them until the didCreateDevice: transfer moves ownership to the runtime
+	// *CustomVirtioDevice wrapper and sets transferred (plan step 8). Reset transferred so
+	// the configuration owns these new references.
 	c.delegate = delegate
 	c.queue = queue
+	c.transferred.Store(false)
 }
