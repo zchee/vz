@@ -76,6 +76,25 @@ func (d *CustomVirtioDevice) RequestDeviceReset() {
 	objc.SendVoid(objc.Ptr(d), "requestDeviceReset")
 }
 
+// UpdateDeviceSpecificConfiguration replaces the device's device-specific configuration
+// with config at runtime, and blocks until the framework reports the update completed or
+// an error. config carries the same kind of serialized device-specific bytes as
+// CustomVirtioDeviceConfiguration.SetDeviceSpecificConfiguration, applied to the live
+// device.
+//
+// config's serialized data must be the same size as the device's current configuration.
+// The framework raises an Objective-C exception on a size mismatch, and that exception
+// cannot be recovered across the purego boundary — it aborts the process — so keeping the
+// size unchanged is a caller precondition, not an error this method returns.
+//
+// It dispatches onto and waits on the device queue, so it must NOT be called from within
+// a CustomVirtioHandler callback (which already runs on that serial queue) — doing so
+// deadlocks. Call it from another goroutine.
+func (d *CustomVirtioDevice) UpdateDeviceSpecificConfiguration(config *VirtioDeviceSpecificConfiguration) error {
+	return completionCall(d.queue, objc.Ptr(d),
+		"updateDeviceSpecificConfiguration:completionHandler:", objc.Ptr(config))
+}
+
 // newVirtioQueue wraps a framework-owned VZVirtioQueue (a +0 property of the device),
 // retaining it so the wrapper can outlive a single callback and releasing it in the
 // finalizer.
