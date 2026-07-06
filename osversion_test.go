@@ -398,6 +398,14 @@ func TestAvailableVersion(t *testing.T) {
 				_, err := NewVirtioDeviceSpecificConfiguration(nil)
 				return err
 			},
+			"NewVirtioSharedMemoryRegionConfiguration": func() error {
+				_, err := NewVirtioSharedMemoryRegionConfiguration(0, 4096)
+				return err
+			},
+			"MaximumAllowedSharedMemoryRegionCount": func() error {
+				_, err := MaximumAllowedSharedMemoryRegionCount()
+				return err
+			},
 		}
 		for name, fn := range cases {
 			t.Run(name, func(t *testing.T) {
