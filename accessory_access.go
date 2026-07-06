@@ -2,6 +2,7 @@ package vz
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -197,11 +198,11 @@ func FindUSBAccessories(criteria ...*USBAccessoryMatchingCriteria) ([]*USBAccess
 	manager := objc.SendClass("AAUSBAccessoryManager", "sharedManager")
 	listener := objc.NewObject(accessoryListenerGoClass)
 
-	critPtrs := make([]unsafe.Pointer, len(criteria))
+	critObjs := make([]objc.NSObject, len(criteria))
 	for i, c := range criteria {
-		critPtrs[i] = objc.Ptr(c)
+		critObjs[i] = c
 	}
-	critArray := makeNSArray(critPtrs...)
+	critArray := objc.ConvertToNSMutableArray(critObjs)
 
 	type result struct {
 		accessories []*USBAccessory
@@ -221,8 +222,11 @@ func FindUSBAccessories(criteria ...*USBAccessoryMatchingCriteria) ([]*USBAccess
 		ch <- result{accessories: accessories}
 	})
 	objc.SendVoid(manager, "registerListener:withMatchingCriteria:completionHandler:",
-		listener, critArray, block)
+		listener, objc.Ptr(critArray), block)
 	res := <-ch
+	// registerListener may reference the criteria array asynchronously; keep the +1
+	// array alive until the completion has fired (the receive above blocks until then).
+	runtime.KeepAlive(critArray)
 	block.Release()
 
 	// Best-effort unregister so the process does not keep receiving events for a

@@ -74,10 +74,15 @@ type VirtioQueue struct {
 // delegate object and recovered inside each IMP. The single Go-backed delegate class
 // shares one IMP across all its instances, so per-instance state lives here rather
 // than in an ivar.
+//
+// Synchronization: device is written once, in customVirtioConfiguration:didCreateDevice:,
+// and both that write and every read happen on the device's serial dispatch queue (every
+// delegate IMP runs there), so device needs no mutex. The configuration finalizer's
+// release path does not touch device and is gated by CustomVirtioDeviceConfiguration.transferred.
 type customVirtioState struct {
 	handler CustomVirtioHandler
 	config  *CustomVirtioDeviceConfiguration // back-ref, so didCreateDevice: can flip transferred
-	device  *CustomVirtioDevice              // set at didCreateDevice: (device-queue only)
+	device  *CustomVirtioDevice              // set once at didCreateDevice:, read on the device queue only
 }
 
 const customVirtioDelegateClassName = "VZCustomVirtioGoDelegate"

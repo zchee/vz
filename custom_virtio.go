@@ -28,13 +28,12 @@ type CustomVirtioDeviceConfiguration struct {
 	// queue installed by SetHandler. The delegate provider holds only a WEAK reference to
 	// the delegate, so this +1 is its sole keep-alive.
 	//
-	// IMPORTANT (B2 scaffold): they are anchored to this configuration only because this
-	// slice never starts a virtual machine. Plan step 8 requires the keep-alive to be
-	// anchored to the VM-run-lifetime *CustomVirtioDevice wrapper, NOT the config — a
-	// config-anchored release frees the delegate mid-run and silently kills callbacks
-	// (pre-mortem #2). Before any VM starts, B3 MUST build that device wrapper in
-	// customVirtioConfiguration:didCreateDevice:, re-anchor these two +1 references to it,
-	// and set transferred=true so this finalizer stops owning them.
+	// The configuration owns these two +1 references until the framework creates the
+	// device: customVirtioConfiguration:didCreateDevice: transfers ownership to the
+	// VM-run-lifetime *CustomVirtioDevice wrapper (see newCustomVirtioDevice) and sets
+	// transferred, after which this configuration's finalizer stops owning them. That
+	// keeps a running device's delegate alive — a config-anchored release would free it
+	// mid-run and silently kill callbacks.
 	delegate    unsafe.Pointer
 	queue       unsafe.Pointer
 	transferred atomic.Bool // set by the didCreateDevice: transfer; read by the finalizer on a GC goroutine, hence atomic
