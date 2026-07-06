@@ -48,3 +48,10 @@ from inside the guest:
 lsblk
 dmesg | grep -i usb
 ```
+
+## USB passthrough
+
+Passing a physical USB accessory from the host into the guest (macOS 27+) is a
+different, hardware- and entitlement-gated flow that a plain `go run` CLI cannot
+demonstrate. See [passthrough.md](passthrough.md) for the requirements and the
+reference code.
