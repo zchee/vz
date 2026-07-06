@@ -7,13 +7,17 @@ vz provides the power of the Apple Virtualization.framework in Go. Put here is b
 
 > The Virtualization framework provides high-level APIs for creating and managing virtual machines (VM) on Apple silicon and Intel-based Mac computers. Use this framework to boot and run macOS or Linux-based operating systems in custom environments that you define. The framework supports the [Virtual I/O Device (VIRTIO)](https://docs.oasis-open.org/virtio/virtio/v1.1/csprd01/virtio-v1.1-csprd01.html) specification, which defines standard interfaces for many device types, including network, socket, serial port, storage, entropy, and memory-balloon devices.
 
+**Note:** this Go binding targets **Apple silicon (arm64)** Macs only and is **cgo-free** — implemented in pure Go via [purego](https://github.com/ebitengine/purego) and building with `CGO_ENABLED=0`. The "Intel-based Mac computers" support mentioned above describes Apple's framework, not this binding.
+
 ## Usage
 
 Please see the [example](https://github.com/Code-Hex/vz/tree/main/example) directory.
 
 ## Requirements
 
-- Higher or equal to macOS Big Sur (11.0.0).
+- Apple silicon (`darwin/arm64`) Macs only — the earlier cgo binding also built for Intel Macs, but the cgo-free purego rewrite is Apple-silicon-only.
+- Higher or equal to macOS Big Sur (11.0.0). Individual features require newer macOS — for example custom Virtio devices, USB passthrough, and macOS guest provisioning require macOS 27; availability is reported at runtime (see [Version compatibility check](#version-compatibility-check)).
+- No C toolchain or Xcode headers required: the binding is cgo-free and builds with `CGO_ENABLED=0`.
 - Latest version of vz supports last two Go major [releases](https://go.dev/doc/devel/release) and might work with older versions.
 
 ## Installation
@@ -28,17 +32,25 @@ Deprecated older versions (v1, v2).
 
 ## Feature Overview
 
-- ✅ Virtualize Linux on a Mac **(x86_64, arm64)**
+- ✅ Virtualize Linux on a Mac **(arm64)**
   - GUI Support
   - Boot Extensible Firmware Interface (EFI) ROM
   - Clipboard sharing through the SPICE agent
 - ✅ Virtualize macOS on Apple Silicon Macs **(arm64)**
     - Fetches the latest restore image supported by this host from the network
   - Start in recovery mode
+  - Guest auto-provisioning at first boot (`MacGuestProvisioningOptions`, macOS 27+)
 - ✅ Running Intel Binaries in Linux VMs with Rosetta **(arm64)**
+- ✅ Custom Virtio devices — implement a Virtio device in Go **(macOS 27+)**
+  - Device configuration (`CustomVirtioDeviceConfiguration`) and the runtime device (`CustomVirtioDevice`): virtqueues, guest-memory mapping, feature negotiation
+  - Virtio shared-memory regions (`VirtioSharedMemoryRegion`, `MapMemory` / `UnmapMemory`)
+  - Device save/restore (`SetSupportsSaveRestore`) and live device-specific configuration updates (`UpdateDeviceSpecificConfiguration`)
+- ✅ USB **(arm64)**
+  - USB device list and XHCI controller (`USBController`, `NewXHCIControllerConfiguration`, macOS 15+)
+  - USB device passthrough via the AccessoryAccess framework (`NewUSBPassthroughDevice`, macOS 27+)
 - ✅ [Shared Directories](https://github.com/Code-Hex/vz/wiki/Shared-Directories)
 - ✅ [Virtio Sockets](https://github.com/Code-Hex/vz/wiki/Sockets)
-- ✅ Less dependent (only under golang.org/x/*)
+- ✅ **cgo-free** — pure Go via [purego](https://github.com/ebitengine/purego); builds with `CGO_ENABLED=0`, no C toolchain or Xcode headers required
 
 ## Important
 
@@ -67,28 +79,6 @@ $ codesign --entitlements vz.entitlements -s - <YOUR BINARY PATH>
 > A process must have the com.apple.security.virtualization entitlement to use the Virtualization APIs.
 
 If you want to use [`VZBridgedNetworkDeviceAttachment`](https://developer.apple.com/documentation/virtualization/vzbridgednetworkdeviceattachment?language=objc), you need to add also `com.apple.vm.networking` entitlement.
-
-## Known compile-time warnings
-
-If you compile using an older Xcode SDK, you will get the following warnings.
-
-This example warns that macOS 12.3 API and macOS 13 API are not available in the binary build. This means these APIs are not available even if you are running this binary on a modern OS (macOS 12.3 or macOS 13). 
-
-```
-$ go build .
-# github.com/Code-Hex/vz/v3
-In file included from _cgo_export.c:4:
-In file included from socket.go:6:
-In file included from ./virtualization_11.h:9:
-./virtualization_helper.h:25:9: warning: macOS 12.3 API has been disabled [-W#pragma-messages]
-./virtualization_helper.h:32:9: warning: macOS 13 API has been disabled [-W#pragma-messages]
-```
-
-If you want to build a binary that can use the API on all operating systems, make sure the Xcode SDK is up-to-date.
-
-You can check the version of the Xcode SDK available for each macOS on this site.
-
-https://xcodereleases.com/
 
 ## Version compatibility check
 
