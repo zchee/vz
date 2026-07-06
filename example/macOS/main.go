@@ -13,14 +13,18 @@ import (
 	"github.com/Code-Hex/vz/v3"
 )
 
-var install bool
-var nbdURL string
-var asifDiskImage bool
+var (
+	install       bool
+	nbdURL        string
+	asifDiskImage bool
+	provision     bool
+)
 
 func init() {
 	flag.BoolVar(&install, "install", false, "run command as install mode")
 	flag.StringVar(&nbdURL, "nbd-url", "", "nbd url (e.g. nbd+unix:///export?socket=nbd.sock)")
 	flag.BoolVar(&asifDiskImage, "asif", false, "use ASIF disk image instead of raw")
+	flag.BoolVar(&provision, "provision", false, "on the first boot after install, provision the macOS guest (create an account, auto-login, Remote Login); requires macOS 27+")
 }
 
 func main() {
@@ -55,7 +59,20 @@ func runVM(ctx context.Context) error {
 		return err
 	}
 
-	if err := vm.Start(); err != nil {
+	// Guest provisioning options are applied on the first boot after a macOS
+	// install/restore, so they are passed to this run's Start (not to the
+	// installer). Without -provision, startOpts is empty and Start behaves as
+	// before.
+	var startOpts []vz.VirtualMachineStartOption
+	if provision {
+		opts, err := macGuestProvisioningOptions()
+		if err != nil {
+			return fmt.Errorf("failed to create guest provisioning options (requires macOS 27+): %w", err)
+		}
+		startOpts = append(startOpts, vz.WithGuestProvisioningOptions(opts))
+		log.Println("provisioning the macOS guest on this boot")
+	}
+	if err := vm.Start(startOpts...); err != nil {
 		return err
 	}
 
@@ -156,6 +173,23 @@ func computeMemorySize() uint64 {
 		memorySize = minAllowed
 	}
 	return memorySize
+}
+
+// macGuestProvisioningOptions builds the guest provisioning options applied on the
+// first boot after a macOS install: a user account, automatic login, and Remote
+// Login (SSH). Passed to Start via vz.WithGuestProvisioningOptions when -provision is
+// set. Requires macOS 27+.
+func macGuestProvisioningOptions() (*vz.MacGuestProvisioningOptions, error) {
+	opts, err := vz.NewMacGuestProvisioningOptions()
+	if err != nil {
+		return nil, err
+	}
+	opts.SetFullName("Example User")
+	opts.SetUsername("example")
+	opts.SetPassword("password")
+	opts.SetLogsInAutomatically(true)
+	opts.SetEnablesRemoteLogin(true)
+	return opts, nil
 }
 
 func createBlockDeviceConfiguration(ctx context.Context, diskPath string) (*vz.VirtioBlockDeviceConfiguration, error) {
