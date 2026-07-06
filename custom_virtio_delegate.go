@@ -33,6 +33,17 @@ type CustomVirtioHandler struct {
 	WillResume func(device *CustomVirtioDevice)
 	// WillReset is called when the device resets.
 	WillReset func(device *CustomVirtioDevice)
+	// SaveStateForRestore is called when the framework needs to save the device's
+	// state so it can be restored later. Return the bytes to persist; return an empty
+	// (or nil) slice if the device has no state to save — both are handed to the
+	// framework as an empty NSData, which means "saved, no state". This is only invoked
+	// when the configuration enabled SetSupportsSaveRestore.
+	SaveStateForRestore func(device *CustomVirtioDevice) []byte
+	// ShouldRestore is called when the framework restores the device from a previously
+	// saved state — saveState is the slice a prior SaveStateForRestore returned. Return
+	// true if the device restored successfully, false if the restore failed. This is
+	// only invoked when the configuration enabled SetSupportsSaveRestore.
+	ShouldRestore func(device *CustomVirtioDevice, saveState []byte) bool
 }
 
 // CustomVirtioDevice is the runtime custom Virtio device the framework creates from a
@@ -96,6 +107,8 @@ func ensureCustomVirtioDelegateClass() (objc.Class, error) {
 				{Cmd: objc.RegisterName("customVirtioDeviceWillPause:"), Fn: customVirtioWillPause},
 				{Cmd: objc.RegisterName("customVirtioDeviceWillResume:"), Fn: customVirtioWillResume},
 				{Cmd: objc.RegisterName("customVirtioDeviceWillReset:"), Fn: customVirtioWillReset},
+				{Cmd: objc.RegisterName("customVirtioDeviceSaveStateForRestore:"), Fn: customVirtioSaveStateForRestore},
+				{Cmd: objc.RegisterName("customVirtioDeviceShouldRestore:saveState:"), Fn: customVirtioShouldRestore},
 			},
 		)
 	})
@@ -164,6 +177,45 @@ func customVirtioWillReset(self objc.ID, _ objc.SEL, _ unsafe.Pointer) {
 	if st := customVirtioStateOf(self); st != nil && st.handler.WillReset != nil {
 		st.handler.WillReset(st.device)
 	}
+}
+
+// customVirtioSaveStateForRestore backs -[<delegate> customVirtioDeviceSaveStateForRestore:],
+// a - (nullable NSData *) method the framework calls to snapshot the device (only when
+// the configuration enabled SetSupportsSaveRestore). It runs on the device serial queue,
+// after didCreateDevice:, so st.device is already set.
+//
+// It MUST return the NSData at +0: a - (NSData *) return does not transfer ownership, so
+// the result is autoreleased (objc.AutoreleasedNSData). When no handler is set it returns
+// an empty NSData, never a nil pointer — the framework treats a nil return as a failed
+// save (see VZCustomVirtioDeviceDelegate.h), which is not what "no state" means. A nil or
+// empty handler result is likewise handed over as an empty NSData. The body must not push
+// its own autorelease pool: draining it would free the return before the framework copies
+// it (the balancing drain is the device queue block's own GCD pool). The handler must not
+// panic — a panic across the framework's C→Go call aborts the process, with no meaningful
+// fallback return.
+func customVirtioSaveStateForRestore(self objc.ID, _ objc.SEL, _ unsafe.Pointer) unsafe.Pointer {
+	st := customVirtioStateOf(self)
+	if st == nil || st.handler.SaveStateForRestore == nil {
+		return objc.AutoreleasedNSData(nil)
+	}
+	return objc.AutoreleasedNSData(st.handler.SaveStateForRestore(st.device))
+}
+
+// customVirtioShouldRestore backs -[<delegate> customVirtioDeviceShouldRestore:saveState:],
+// a - (BOOL) method the framework calls to restore the device from the bytes a prior
+// customVirtioDeviceSaveStateForRestore: produced. It returns false (restore failed) when
+// no handler is set.
+//
+// saveState is a +0 argument the framework owns; NSDataToBytes copies it into a Go slice
+// (a nil NSData* becomes nil, a zero-length one becomes an empty slice), so this IMP must
+// not release saveState and the handler receives a copy whose lifetime is independent of
+// the framework's.
+func customVirtioShouldRestore(self objc.ID, _ objc.SEL, _, saveState unsafe.Pointer) bool {
+	st := customVirtioStateOf(self)
+	if st == nil || st.handler.ShouldRestore == nil {
+		return false
+	}
+	return st.handler.ShouldRestore(st.device, objc.NSDataToBytes(saveState))
 }
 
 // SetHandler makes this configuration emulate a custom Virtio device implemented in

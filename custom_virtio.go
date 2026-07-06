@@ -131,6 +131,25 @@ func (c *CustomVirtioDeviceConfiguration) SetDeviceSpecificConfiguration(config 
 	objc.SendVoid(objc.Ptr(c), "setDeviceSpecificConfiguration:", objc.Ptr(config))
 }
 
+// SetSupportsSaveRestore sets whether the device supports save and restore. It
+// defaults to false.
+//
+// When you enable it, the handler you install with SetHandler must set both
+// CustomVirtioHandler.SaveStateForRestore and CustomVirtioHandler.ShouldRestore:
+// SaveStateForRestore must return a non-nil slice — return an empty []byte for a
+// device with no state to save, never nil, because the framework treats a nil save
+// state as a failed save. The Go-backed delegate always implements both Objective-C
+// selectors, so the framework's "delegate must respond to the save/restore methods"
+// requirement is met regardless; it is the Go callbacks that you must supply.
+func (c *CustomVirtioDeviceConfiguration) SetSupportsSaveRestore(supports bool) {
+	objc.SendVoid(objc.Ptr(c), "setSupportsSaveRestore:", supports)
+}
+
+// SupportsSaveRestore reports whether the device supports save and restore.
+func (c *CustomVirtioDeviceConfiguration) SupportsSaveRestore() bool {
+	return objc.Send[bool](objc.ID(uintptr(objc.Ptr(c))), objc.RegisterName("supportsSaveRestore"))
+}
+
 // VirtioFeatureSet represents a 64-bit set of Virtio feature bits, encoded as two
 // 32-bit subsets (subset0 is bits 0–31, subset1 is bits 32–63).
 //

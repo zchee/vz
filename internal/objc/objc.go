@@ -40,6 +40,7 @@ var (
 	selInitWithBytesLength  pobjc.SEL
 	selBytes                pobjc.SEL
 	selLength               pobjc.SEL
+	selAutorelease          pobjc.SEL
 
 	// dispatchRelease is bound to libdispatch's dispatch_release when present.
 	dispatchRelease func(unsafe.Pointer)
@@ -72,6 +73,7 @@ func init() {
 	selInitWithBytesLength = pobjc.RegisterName("initWithBytes:length:")
 	selBytes = pobjc.RegisterName("bytes")
 	selLength = pobjc.RegisterName("length")
+	selAutorelease = pobjc.RegisterName("autorelease")
 
 	if sym, err := purego.Dlsym(purego.RTLD_DEFAULT, "dispatch_release"); err == nil && sym != 0 {
 		purego.RegisterFunc(&dispatchRelease, sym)

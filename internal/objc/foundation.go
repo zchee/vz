@@ -54,6 +54,25 @@ func NSData(b []byte) unsafe.Pointer {
 	return data
 }
 
+// AutoreleasedNSData returns an NSData copying b, added to the current autorelease
+// pool so its net retain count is +0, as a raw object pointer. Use it where a method
+// returns an NSData * whose ownership it does not hand to the caller — for example a
+// - (NSData *) delegate method whose result the framework copies and does not release.
+//
+// b may be nil or empty; the result is a valid empty NSData ([NSData data]-equivalent),
+// never a nil pointer. Unlike NSData (which returns a +1 object the caller must
+// release), the caller must NOT release this result. Do not wrap the call site in an
+// AutoreleasePoolPush/AutoreleasePoolPop that drains before the consumer copies the
+// bytes: that would free the object while the consumer still holds it. When used as an
+// Objective-C method's return value the pool that eventually balances the autorelease is
+// the caller's own (for a delegate invoked on a dispatch queue, the queue block's GCD
+// autorelease pool), which drains only after the framework has taken its copy.
+func AutoreleasedNSData(b []byte) unsafe.Pointer {
+	data := NSData(b)
+	objcID(data).Send(selAutorelease)
+	return data
+}
+
 // NSDataToBytes copies the contents of an NSData object into a new Go byte
 // slice. It returns nil for a nil data pointer. The copy makes the result
 // independent of the NSData's lifetime.
