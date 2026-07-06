@@ -8,7 +8,7 @@ import (
 
 // CreateVMBundle creates macOS VM bundle path if not exists.
 func CreateVMBundle() error {
-	return os.MkdirAll(GetVMBundlePath(), 0777)
+	return os.MkdirAll(GetVMBundlePath(), 0o777)
 }
 
 // GetVMBundlePath gets macOS VM bundle path.
